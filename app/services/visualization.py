@@ -296,10 +296,17 @@ def plot_feature_importance(importance_df: pd.DataFrame,
     return fig
 
 
-def plot_psd(freqs: np.ndarray, psd: np.ndarray, 
+def plot_psd(psd_data, freqs: np.ndarray = None, 
             channel_names: List[str] = None,
             selected_channels: List[int] = None) -> go.Figure:
-    """Create PSD plot with frequency band annotations."""
+    """Create PSD plot with frequency band annotations.
+    
+    Args:
+        psd_data: Either a 2D numpy array (channels x frequencies) or a dict {channel_name: psd_array}
+        freqs: Frequency array (required if psd_data is numpy array, optional if dict)
+        channel_names: List of channel names (used if psd_data is numpy array)
+        selected_channels: Indices of channels to plot (used if psd_data is numpy array)
+    """
     bands = get_frequency_bands()
     band_colors = {
         'delta': 'rgba(128, 0, 128, 0.2)',
@@ -311,31 +318,90 @@ def plot_psd(freqs: np.ndarray, psd: np.ndarray,
     
     fig = go.Figure()
     
-    # Add frequency band shading
-    for band_name, band_range in bands.items():
-        fig.add_vrect(
-            x0=band_range[0],
-            x1=band_range[1],
-            fillcolor=band_colors.get(band_name, 'rgba(128,128,128,0.2)'),
-            layer='below',
-            line_width=0,
-            annotation_text=band_name,
-            annotation_position='top left'
-        )
-    
-    # Plot PSD for selected channels
-    if selected_channels is None:
-        selected_channels = range(min(5, psd.shape[0]))
-    
-    for i, ch_idx in enumerate(selected_channels):
-        if ch_idx < psd.shape[0]:
-            name = channel_names[ch_idx] if channel_names else f'Ch {ch_idx}'
+    # Handle dictionary input
+    if isinstance(psd_data, dict):
+        channel_names = list(psd_data.keys())
+        psd_arrays = list(psd_data.values())
+        
+        # Add frequency band shading
+        for band_name, band_range in bands.items():
+            fig.add_vrect(
+                x0=band_range[0],
+                x1=band_range[1],
+                fillcolor=band_colors.get(band_name, 'rgba(128,128,128,0.2)'),
+                layer='below',
+                line_width=0,
+                annotation_text=band_name,
+                annotation_position='top left'
+            )
+        
+        # Plot PSD for each channel
+        for ch_name, psd_array in zip(channel_names, psd_arrays):
+            # Ensure freqs is a numpy array
+            if freqs is not None:
+                x_vals = np.asarray(freqs).flatten()
+            else:
+                x_vals = np.arange(len(psd_array))
+            
+            y_vals = np.asarray(psd_array).flatten()
+            
             fig.add_trace(go.Scatter(
-                x=freqs,
-                y=psd[ch_idx],
-                name=name,
+                x=x_vals,
+                y=y_vals,
+                name=ch_name,
                 mode='lines'
             ))
+    else:
+        # Original numpy array handling
+        psd = np.asarray(psd_data)
+        freqs = np.asarray(freqs).flatten() if freqs is not None else np.arange(psd.shape[1] if psd.ndim > 1 else len(psd))
+        
+        # Add frequency band shading
+        for band_name, band_range in bands.items():
+            fig.add_vrect(
+                x0=band_range[0],
+                x1=band_range[1],
+                fillcolor=band_colors.get(band_name, 'rgba(128,128,128,0.2)'),
+                layer='below',
+                line_width=0,
+                annotation_text=band_name,
+                annotation_position='top left'
+            )
+        
+        # Handle 1D array
+        if psd.ndim == 1:
+            fig.add_trace(go.Scatter(
+                x=freqs,
+                y=psd,
+                name='PSD',
+                mode='lines'
+            ))
+        else:
+            # Plot PSD for selected channels
+            if selected_channels is None:
+                selected_channels = range(min(5, psd.shape[0]))
+            
+            for i, ch_idx in enumerate(selected_channels):
+                if isinstance(ch_idx, str) and channel_names:
+                    # ch_idx is a channel name
+                    name = ch_idx
+                    if ch_idx in channel_names:
+                        idx = channel_names.index(ch_idx)
+                        if idx < psd.shape[0]:
+                            fig.add_trace(go.Scatter(
+                                x=freqs,
+                                y=psd[idx],
+                                name=name,
+                                mode='lines'
+                            ))
+                elif isinstance(ch_idx, int) and ch_idx < psd.shape[0]:
+                    name = channel_names[ch_idx] if channel_names and ch_idx < len(channel_names) else f'Ch {ch_idx}'
+                    fig.add_trace(go.Scatter(
+                        x=freqs,
+                        y=psd[ch_idx],
+                        name=name,
+                        mode='lines'
+                    ))
     
     fig.update_layout(
         title='Power Spectral Density',
