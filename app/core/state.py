@@ -71,6 +71,19 @@ def add_prediction(prediction: Dict):
     st.session_state.predictions.append(prediction)
 
 
+def add_prediction_to_history(filename: str, prediction: str, confidence: float):
+    """Add a prediction result to the history (simplified interface)."""
+    if "predictions_history" not in st.session_state:
+        st.session_state.predictions_history = []
+    
+    st.session_state.predictions_history.append({
+        "filename": filename,
+        "prediction": prediction,
+        "confidence": confidence,
+        "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    })
+
+
 def get_predictions() -> List[Dict]:
     """Get prediction history."""
     return st.session_state.get("predictions", [])
