@@ -113,11 +113,13 @@ def render_signal_lab():
     col1, col2, col3 = st.columns(3)
     
     with col1:
+        max_time = max(1.0, min(30.0, float(duration)))
+        default_time = max(1.0, min(10.0, float(duration)))
         time_window = st.slider(
             "Time Window (seconds)",
             min_value=1.0,
-            max_value=min(30.0, duration),
-            value=min(10.0, duration),
+            max_value=max_time,
+            value=default_time,
             step=1.0
         )
     
