@@ -65,7 +65,8 @@ def render_signal_lab():
     eeg_path = get_subject_eeg_path(selected_subject)
     
     if eeg_path is None:
-        st.warning(f"EEG file not found for subject {selected_subject}. Showing demo data.")
+        st.info(f"📊 **Demo Mode**: EEG dataset not available on cloud deployment. Showing realistic synthetic EEG data for {selected_subject}.")
+        st.caption("💡 To use real data, run locally with the ds004504 dataset downloaded.")
         # Generate demo data
         fs = 500
         duration = 10
@@ -74,15 +75,30 @@ def render_signal_lab():
         np.random.seed(hash(selected_subject) % 2**32)
         t = np.linspace(0, duration, int(fs * duration))
         
-        # Create synthetic EEG with realistic characteristics
+        # Get subject's group to generate appropriate signals
+        subject_data = df[df['Subject_ID'] == selected_subject].iloc[0]
+        subject_group = subject_data.get('Group', 'CN')
+        
+        # Create synthetic EEG with group-specific characteristics
         data = {}
         for ch in channels:
-            # Base signal with alpha and theta components
-            alpha = 10 * np.sin(2 * np.pi * 10 * t + np.random.rand() * 2 * np.pi)
-            theta = 5 * np.sin(2 * np.pi * 6 * t + np.random.rand() * 2 * np.pi)
+            # Base frequencies vary by group (AD has more theta/delta, less alpha)
+            if subject_group == 'AD':
+                alpha_amp, theta_amp, delta_amp = 6, 12, 8
+                alpha_freq = 8.5  # Slowed alpha
+            elif subject_group == 'FTD':
+                alpha_amp, theta_amp, delta_amp = 7, 10, 6
+                alpha_freq = 9.0
+            else:  # CN
+                alpha_amp, theta_amp, delta_amp = 12, 5, 3
+                alpha_freq = 10.5  # Normal alpha
+            
+            alpha = alpha_amp * np.sin(2 * np.pi * alpha_freq * t + np.random.rand() * 2 * np.pi)
+            theta = theta_amp * np.sin(2 * np.pi * 6 * t + np.random.rand() * 2 * np.pi)
+            delta = delta_amp * np.sin(2 * np.pi * 2 * t + np.random.rand() * 2 * np.pi)
             beta = 3 * np.sin(2 * np.pi * 20 * t + np.random.rand() * 2 * np.pi)
             noise = np.random.randn(len(t)) * 2
-            data[ch] = alpha + theta + beta + noise
+            data[ch] = alpha + theta + delta + beta + noise
         
         raw = None
         demo_mode = True
