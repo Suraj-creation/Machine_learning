@@ -349,11 +349,24 @@ def plot_psd(freqs: np.ndarray, psd: np.ndarray,
     return fig
 
 
-def plot_raw_eeg(data: np.ndarray, sfreq: float = 500,
+def plot_raw_eeg(data, sfreq: float = 500,
                 channel_names: List[str] = None,
                 start_time: float = 0,
                 duration: float = 10) -> go.Figure:
-    """Create raw EEG trace plot with channel offsets."""
+    """Create raw EEG trace plot with channel offsets.
+    
+    Args:
+        data: Either a 2D numpy array (channels x samples) or a dict {channel_name: signal_array}
+        sfreq: Sampling frequency in Hz
+        channel_names: List of channel names (used if data is numpy array)
+        start_time: Start time in seconds
+        duration: Duration to display in seconds
+    """
+    # Handle dictionary input
+    if isinstance(data, dict):
+        channel_names = list(data.keys())
+        data = np.array([data[ch] for ch in channel_names])
+    
     n_channels = data.shape[0]
     n_samples = int(duration * sfreq)
     start_sample = int(start_time * sfreq)
@@ -365,7 +378,7 @@ def plot_raw_eeg(data: np.ndarray, sfreq: float = 500,
     plot_data = data[:, start_sample:end_sample]
     
     # Normalize each channel for display
-    offset_scale = np.std(plot_data) * 5
+    offset_scale = np.std(plot_data) * 5 if np.std(plot_data) > 0 else 1
     
     fig = go.Figure()
     
