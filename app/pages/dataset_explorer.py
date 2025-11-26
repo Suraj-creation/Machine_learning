@@ -1,0 +1,434 @@
+"""
+Dataset Explorer page for browsing and visualizing participant data.
+"""
+import streamlit as st
+import pandas as pd
+import plotly.graph_objects as go
+
+from app.core.config import get_class_color
+from app.services.data_access import load_participants, get_dataset_stats
+from app.services.visualization import (
+    plot_class_distribution,
+    plot_age_distribution,
+    plot_mmse_boxplot,
+    plot_gender_distribution
+)
+
+
+def render_acquisition_protocol():
+    """Render the acquisition protocol information."""
+    st.markdown("#### 📡 EEG Acquisition Protocol")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        ##### Recording Parameters
+        
+        | Parameter | Value |
+        |-----------|-------|
+        | Sampling Rate | 500 Hz |
+        | Duration | ~5 minutes |
+        | Reference | Average |
+        | State | Eyes-closed resting |
+        | Format | EEGLAB (.set) |
+        """)
+        
+        st.markdown("""
+        ##### Preprocessing Applied
+        
+        - Band-pass filter (0.5-45 Hz)
+        - Artifact rejection (ICA)
+        - Bad channel interpolation
+        - Re-referencing to average
+        """)
+    
+    with col2:
+        st.markdown("""
+        ##### 10-20 Electrode System
+        
+        The international 10-20 system uses 19 scalp electrodes positioned
+        at standardized locations:
+        """)
+        
+        # Create a simple electrode map visualization
+        electrodes = {
+            'Fp1': (-0.3, 0.9), 'Fp2': (0.3, 0.9),
+            'F7': (-0.7, 0.6), 'F3': (-0.35, 0.6), 'Fz': (0, 0.6), 'F4': (0.35, 0.6), 'F8': (0.7, 0.6),
+            'T3': (-0.9, 0), 'C3': (-0.45, 0), 'Cz': (0, 0), 'C4': (0.45, 0), 'T4': (0.9, 0),
+            'T5': (-0.7, -0.6), 'P3': (-0.35, -0.6), 'Pz': (0, -0.6), 'P4': (0.35, -0.6), 'T6': (0.7, -0.6),
+            'O1': (-0.3, -0.9), 'O2': (0.3, -0.9)
+        }
+        
+        fig = go.Figure()
+        
+        # Add head outline
+        theta = [i * 3.14159 / 180 for i in range(361)]
+        fig.add_trace(go.Scatter(
+            x=[1.1 * 0.95 * (0 if i == 360 else (1 if i < 180 else -1) * abs(__import__('math').sin(i * 3.14159 / 180))) for i in range(361)],
+            y=[1.1 * 0.95 * __import__('math').cos(i * 3.14159 / 180) for i in range(361)],
+            mode='lines',
+            line=dict(color='#1E3A8A', width=2),
+            showlegend=False
+        ))
+        
+        # Add head circle (simplified)
+        import math
+        x_circle = [0.95 * math.cos(t) for t in [i * math.pi / 180 for i in range(361)]]
+        y_circle = [0.95 * math.sin(t) for t in [i * math.pi / 180 for i in range(361)]]
+        fig.add_trace(go.Scatter(
+            x=x_circle, y=y_circle,
+            mode='lines',
+            line=dict(color='#1E3A8A', width=2),
+            showlegend=False
+        ))
+        
+        # Add nose
+        fig.add_trace(go.Scatter(
+            x=[0], y=[1.05],
+            mode='markers',
+            marker=dict(symbol='triangle-up', size=15, color='#1E3A8A'),
+            showlegend=False
+        ))
+        
+        # Add electrodes
+        for name, (x, y) in electrodes.items():
+            fig.add_trace(go.Scatter(
+                x=[x], y=[y],
+                mode='markers+text',
+                marker=dict(size=20, color='#60A5FA'),
+                text=[name],
+                textposition='middle center',
+                textfont=dict(size=8, color='white'),
+                showlegend=False
+            ))
+        
+        fig.update_layout(
+            width=300,
+            height=350,
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.2, 1.2]),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.2, 1.2], scaleanchor='x'),
+            margin=dict(l=0, r=0, t=20, b=0),
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)'
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+    
+    # BIDS structure
+    st.markdown("---")
+    st.markdown("#### 📁 BIDS Data Structure")
+    
+    st.code("""
+data/ds004504/
+├── participants.tsv         # Subject demographics
+├── participants.json        # Column descriptions
+├── dataset_description.json # Dataset metadata
+├── CHANGES                  # Version history
+├── README                   # Dataset documentation
+├── derivatives/             # Processed data
+│   └── sub-XXX/
+│       └── eeg/
+│           └── *_desc-preproc_eeg.set
+└── sub-XXX/                 # Raw data per subject
+    └── eeg/
+        ├── *_eeg.set        # EEGLAB format
+        ├── *_eeg.fdt        # Data file
+        └── *_channels.tsv   # Channel info
+    """, language="")
+    
+    # Region descriptions
+    st.markdown("---")
+    st.markdown("#### 🧠 Brain Regions")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.markdown("""
+        <div style="background: #FF6B6B20; padding: 1rem; border-radius: 8px; border-left: 4px solid #FF6B6B;">
+            <h5 style="margin: 0; color: #FF6B6B;">Frontal</h5>
+            <p style="font-size: 0.875rem; margin: 0.5rem 0 0 0;">Fp1, Fp2, F3, Fz, F4, F7, F8</p>
+            <p style="font-size: 0.75rem; color: #6B7280;">Executive function, planning</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+        <div style="background: #51CF6620; padding: 1rem; border-radius: 8px; border-left: 4px solid #51CF66;">
+            <h5 style="margin: 0; color: #51CF66;">Central</h5>
+            <p style="font-size: 0.875rem; margin: 0.5rem 0 0 0;">C3, Cz, C4</p>
+            <p style="font-size: 0.75rem; color: #6B7280;">Motor, sensory processing</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("""
+        <div style="background: #339AF020; padding: 1rem; border-radius: 8px; border-left: 4px solid #339AF0;">
+            <h5 style="margin: 0; color: #339AF0;">Temporal</h5>
+            <p style="font-size: 0.875rem; margin: 0.5rem 0 0 0;">T3, T4, T5, T6</p>
+            <p style="font-size: 0.75rem; color: #6B7280;">Memory, language</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col4:
+        st.markdown("""
+        <div style="background: #FFA94D20; padding: 1rem; border-radius: 8px; border-left: 4px solid #FFA94D;">
+            <h5 style="margin: 0; color: #FFA94D;">Parietal/Occipital</h5>
+            <p style="font-size: 0.875rem; margin: 0.5rem 0 0 0;">P3, Pz, P4, O1, O2</p>
+            <p style="font-size: 0.75rem; color: #6B7280;">Alpha rhythm, visual</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+def render_dataset_explorer():
+    """Render the Dataset Explorer page."""
+    st.markdown("## 📊 Dataset Explorer")
+    st.markdown("Browse participant demographics, filter by criteria, and visualize distributions.")
+    st.markdown("---")
+    
+    # Load data
+    df = load_participants()
+    stats = get_dataset_stats(df)
+    
+    # Filters in sidebar-like expander
+    with st.expander("🔍 **Filter Options**", expanded=True):
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            groups = ['All'] + list(df['Group'].unique())
+            selected_group = st.selectbox("Diagnosis Group", groups)
+        
+        with col2:
+            genders = ['All'] + list(df['Gender'].unique())
+            selected_gender = st.selectbox("Gender", genders)
+        
+        with col3:
+            age_range = st.slider(
+                "Age Range",
+                min_value=int(df['Age'].min()) if 'Age' in df.columns else 50,
+                max_value=int(df['Age'].max()) if 'Age' in df.columns else 90,
+                value=(50, 90)
+            )
+        
+        with col4:
+            mmse_range = st.slider(
+                "MMSE Range",
+                min_value=0,
+                max_value=30,
+                value=(0, 30)
+            )
+    
+    # Apply filters
+    filtered_df = df.copy()
+    
+    if selected_group != 'All':
+        filtered_df = filtered_df[filtered_df['Group'] == selected_group]
+    
+    if selected_gender != 'All':
+        filtered_df = filtered_df[filtered_df['Gender'] == selected_gender]
+    
+    if 'Age' in filtered_df.columns:
+        filtered_df = filtered_df[
+            (filtered_df['Age'] >= age_range[0]) & 
+            (filtered_df['Age'] <= age_range[1])
+        ]
+    
+    if 'MMSE' in filtered_df.columns:
+        filtered_df = filtered_df[
+            (filtered_df['MMSE'] >= mmse_range[0]) & 
+            (filtered_df['MMSE'] <= mmse_range[1])
+        ]
+    
+    # Summary stats
+    st.markdown("### 📈 Summary Statistics")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric(
+            "Total Subjects",
+            len(filtered_df),
+            delta=f"{len(filtered_df) - len(df)}" if len(filtered_df) != len(df) else None
+        )
+    
+    with col2:
+        if 'Age' in filtered_df.columns and len(filtered_df) > 0:
+            st.metric("Mean Age", f"{filtered_df['Age'].mean():.1f} yrs")
+        else:
+            st.metric("Mean Age", "N/A")
+    
+    with col3:
+        if 'MMSE' in filtered_df.columns and len(filtered_df) > 0:
+            st.metric("Mean MMSE", f"{filtered_df['MMSE'].mean():.1f}")
+        else:
+            st.metric("Mean MMSE", "N/A")
+    
+    with col4:
+        if 'Gender' in filtered_df.columns and len(filtered_df) > 0:
+            male_pct = (filtered_df['Gender'] == 'M').sum() / len(filtered_df) * 100
+            st.metric("Male %", f"{male_pct:.1f}%")
+        else:
+            st.metric("Male %", "N/A")
+    
+    st.markdown("---")
+    
+    # Visualizations
+    st.markdown("### 📊 Demographic Visualizations")
+    
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "Class Distribution",
+        "Age Distribution",
+        "MMSE Scores",
+        "Gender Distribution",
+        "Acquisition Protocol"
+    ])
+    
+    with tab1:
+        if len(filtered_df) > 0:
+            fig = plot_class_distribution(filtered_df)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("No data available with current filters.")
+    
+    with tab2:
+        if len(filtered_df) > 0 and 'Age' in filtered_df.columns:
+            fig = plot_age_distribution(filtered_df)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Age data not available.")
+    
+    with tab3:
+        if len(filtered_df) > 0 and 'MMSE' in filtered_df.columns:
+            fig = plot_mmse_boxplot(filtered_df)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("MMSE data not available.")
+    
+    with tab4:
+        if len(filtered_df) > 0 and 'Gender' in filtered_df.columns:
+            fig = plot_gender_distribution(filtered_df)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("Gender data not available.")
+    
+    with tab5:
+        render_acquisition_protocol()
+    
+    st.markdown("---")
+    
+    # Participants table
+    st.markdown("### 👥 Participants Table")
+    
+    # Column selection
+    all_cols = list(filtered_df.columns)
+    default_cols = ['Subject_ID', 'Group', 'Age', 'Gender', 'MMSE']
+    available_default = [c for c in default_cols if c in all_cols]
+    
+    selected_cols = st.multiselect(
+        "Select columns to display",
+        options=all_cols,
+        default=available_default
+    )
+    
+    if selected_cols:
+        # Add color-coded Group column
+        display_df = filtered_df[selected_cols].copy()
+        
+        # Add search functionality
+        search_term = st.text_input("🔍 Search subjects", placeholder="Enter Subject ID...")
+        
+        if search_term:
+            display_df = display_df[
+                display_df.astype(str).apply(
+                    lambda x: x.str.contains(search_term, case=False)
+                ).any(axis=1)
+            ]
+        
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            height=400
+        )
+        
+        # Download button
+        csv = display_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download CSV",
+            data=csv,
+            file_name="filtered_participants.csv",
+            mime="text/csv"
+        )
+    
+    st.markdown("---")
+    
+    # Subject Detail Browser
+    st.markdown("### 🔍 Subject Detail Browser")
+    
+    if len(filtered_df) > 0:
+        subject_ids = filtered_df['Subject_ID'].tolist()
+        selected_subject = st.selectbox(
+            "Select a subject to view details",
+            options=subject_ids
+        )
+        
+        if selected_subject:
+            subject_data = filtered_df[filtered_df['Subject_ID'] == selected_subject].iloc[0]
+            
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown("#### Basic Info")
+                st.write(f"**Subject ID:** {subject_data['Subject_ID']}")
+                if 'Group' in subject_data:
+                    group = subject_data['Group']
+                    color = get_class_color(group)
+                    st.markdown(f"**Diagnosis:** <span style='color: {color}; font-weight: bold;'>{group}</span>", unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown("#### Demographics")
+                if 'Age' in subject_data:
+                    st.write(f"**Age:** {subject_data['Age']} years")
+                if 'Gender' in subject_data:
+                    st.write(f"**Gender:** {subject_data['Gender']}")
+            
+            with col3:
+                st.markdown("#### Clinical")
+                if 'MMSE' in subject_data:
+                    mmse = subject_data['MMSE']
+                    if pd.notna(mmse):
+                        mmse_color = "#51CF66" if mmse >= 24 else "#FFA94D" if mmse >= 18 else "#FF6B6B"
+                        st.markdown(f"**MMSE Score:** <span style='color: {mmse_color}; font-weight: bold;'>{mmse:.0f}/30</span>", unsafe_allow_html=True)
+                    else:
+                        st.write("**MMSE Score:** Not available")
+            
+            # Link to Signal Lab
+            if st.button("🔬 View EEG Signals →", key="view_signals"):
+                st.session_state.selected_subject = selected_subject
+                st.info("Navigate to Signal Lab from the sidebar to view this subject's EEG data.")
+    else:
+        st.info("No subjects match the current filter criteria.")
+    
+    # Group comparison
+    st.markdown("---")
+    st.markdown("### 📊 Group Comparison")
+    
+    if len(df) > 0:
+        comparison_df = df.groupby('Group').agg({
+            'Subject_ID': 'count',
+            'Age': ['mean', 'std'],
+            'MMSE': ['mean', 'std']
+        }).round(2)
+        
+        # Flatten column names
+        comparison_df.columns = [
+            'Count', 'Age (Mean)', 'Age (SD)', 'MMSE (Mean)', 'MMSE (SD)'
+        ]
+        
+        comparison_df = comparison_df.reset_index()
+        
+        st.dataframe(
+            comparison_df,
+            use_container_width=True,
+            hide_index=True
+        )

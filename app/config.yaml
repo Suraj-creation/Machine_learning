@@ -1,0 +1,98 @@
+# EEG Alzheimer Classification App Configuration
+
+paths:
+  data_root: "data/ds004504"
+  models_root: "models"
+  outputs_root: "outputs"
+  logs_dir: "logs"
+  participants_file: "data/ds004504/participants.tsv"
+  derivatives_dir: "data/ds004504/derivatives"
+
+model_files:
+  lightgbm: "best_lightgbm_model.joblib"
+  scaler: "feature_scaler.joblib"
+  label_encoder: "label_encoder.joblib"
+
+output_files:
+  improvement_results: "all_improvement_results.csv"
+  baseline_results: "real_eeg_baseline_results.csv"
+  epoch_features_sample: "epoch_features_sample.csv"
+
+eeg:
+  sampling_rate: 500
+  n_channels: 19
+  channels:
+    - Fp1
+    - Fp2
+    - F7
+    - F3
+    - Fz
+    - F4
+    - F8
+    - T3
+    - C3
+    - Cz
+    - C4
+    - T4
+    - T5
+    - P3
+    - Pz
+    - P4
+    - T6
+    - O1
+    - O2
+  frequency_bands:
+    delta: [0.5, 4]
+    theta: [4, 8]
+    alpha: [8, 13]
+    beta: [13, 30]
+    gamma: [30, 45]
+  regions:
+    frontal: [Fp1, Fp2, F7, F3, Fz, F4, F8]
+    temporal: [T3, T4, T5, T6]
+    parietal: [P3, Pz, P4]
+    occipital: [O1, O2]
+    central: [C3, Cz, C4]
+
+epoch:
+  window_seconds: 2
+  overlap_fraction: 0.5
+  max_epochs_per_subject: 50
+
+classes:
+  labels: ["AD", "CN", "FTD"]
+  mapping:
+    A: "AD"
+    C: "CN"
+    F: "FTD"
+  colors:
+    AD: "#FF6B6B"
+    CN: "#51CF66"
+    FTD: "#339AF0"
+
+ui:
+  colors:
+    primary: "#1E3A8A"
+    secondary: "#60A5FA"
+    background: "#F9FAFB"
+    success: "#51CF66"
+    warning: "#FF6B6B"
+    info: "#339AF0"
+  max_upload_mb: 200
+  allowed_extensions: [".set", ".fdt", ".edf"]
+
+performance:
+  metrics:
+    three_class_accuracy: 0.482
+    binary_dementia_healthy: 0.72
+    binary_ad_cn: 0.673
+    binary_ad_ftd: 0.583
+  recalls:
+    AD: 0.608
+    CN: 0.514
+    FTD: 0.269
+
+confidence_thresholds:
+  high: 0.7
+  medium: 0.5
+  low: 0.0
