@@ -148,8 +148,9 @@ def compute_permutation_entropy(data: np.ndarray, order: int = 3,
         probs = np.array(list(pattern_counts.values())) / n_patterns
         pe = -np.sum(probs * np.log2(probs + 1e-10))
         
-        # Normalize
-        max_pe = np.log2(np.math.factorial(order))
+        # Normalize (use math.factorial instead of np.math.factorial)
+        import math
+        max_pe = np.log2(math.factorial(order))
         pe_values.append(pe / max_pe if max_pe > 0 else 0)
     
     return np.array(pe_values)
