@@ -248,25 +248,46 @@ def plot_confusion_matrix(confusion_matrix: np.ndarray,
     return fig
 
 
-def plot_roc_curves(fpr: Dict[str, np.ndarray], 
-                   tpr: Dict[str, np.ndarray],
-                   auc: Dict[str, float]) -> go.Figure:
-    """Create ROC curves for multi-class classification."""
+def plot_roc_curves(roc_data, tpr: Dict[str, np.ndarray] = None,
+                   auc: Dict[str, float] = None) -> go.Figure:
+    """Create ROC curves for multi-class classification.
+    
+    Args:
+        roc_data: Either a dict with keys like {'AD': {'fpr': [...], 'tpr': [...], 'auc': 0.72}, ...}
+                  OR a dict of fpr values (old format, requires tpr and auc params)
+        tpr: Dict of true positive rates (optional, old format)
+        auc: Dict of AUC values (optional, old format)
+    """
     fig = go.Figure()
     
     colors = {
         'AD': get_class_color('AD'),
         'CN': get_class_color('CN'),
-        'FTD': get_class_color('FTD')
+        'FTD': get_class_color('FTD'),
+        'Dementia': get_class_color('AD'),
+        'Healthy': get_class_color('CN')
     }
     
-    for label in fpr.keys():
-        fig.add_trace(go.Scatter(
-            x=fpr[label],
-            y=tpr[label],
-            name=f'{label} (AUC = {auc.get(label, 0):.2f})',
-            line=dict(color=colors.get(label, '#808080'))
-        ))
+    # Handle new format: single dict with nested structure
+    if tpr is None and auc is None:
+        # New format: roc_data = {'AD': {'fpr': [], 'tpr': [], 'auc': 0.72}, ...}
+        for label, data in roc_data.items():
+            fig.add_trace(go.Scatter(
+                x=data['fpr'],
+                y=data['tpr'],
+                name=f"{label} (AUC = {data.get('auc', 0):.2f})",
+                line=dict(color=colors.get(label, '#808080'))
+            ))
+    else:
+        # Old format: separate fpr, tpr, auc dicts
+        fpr = roc_data
+        for label in fpr.keys():
+            fig.add_trace(go.Scatter(
+                x=fpr[label],
+                y=tpr[label],
+                name=f'{label} (AUC = {auc.get(label, 0):.2f})',
+                line=dict(color=colors.get(label, '#808080'))
+            ))
     
     # Diagonal line
     fig.add_trace(go.Scatter(

@@ -312,8 +312,7 @@ def render_correlations(feature_categories):
         scatter_df, x=feature_x, y=feature_y,
         color='Group',
         color_discrete_map=colors,
-        title=f"{feature_x} vs {feature_y}",
-        trendline="ols"
+        title=f"{feature_x} vs {feature_y}"
     )
     
     fig.update_layout(height=400)

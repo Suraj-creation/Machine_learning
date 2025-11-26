@@ -181,21 +181,36 @@ def extract_all_features(data: np.ndarray, sfreq: float = 500,
     Extract all 438 features from EEG data.
     
     Args:
-        data: EEG data (n_channels, n_samples)
+        data: EEG data - can be (n_channels, n_samples) or (n_samples,) for single channel
         sfreq: Sampling frequency
         channel_names: List of channel names
         
     Returns:
         Dictionary of feature_name: value pairs
     """
+    # Ensure data is 2D
+    data = np.atleast_2d(data)
+    if data.shape[0] > data.shape[1]:
+        # Data is (n_samples, n_channels), transpose to (n_channels, n_samples)
+        data = data.T
+    
+    n_channels = data.shape[0]
+    
     if channel_names is None:
-        channel_names = get_channels()
+        if n_channels == 1:
+            channel_names = ['avg']
+        else:
+            channel_names = get_channels()[:n_channels]
+    else:
+        channel_names = channel_names[:n_channels]
     
     features = {}
     bands = get_frequency_bands()
     
     # Compute PSD
     freqs, psd = compute_psd(data, sfreq)
+    # Ensure psd is 2D
+    psd = np.atleast_2d(psd)
     
     # Total power for relative calculations
     total_power = np.trapz(psd, freqs, axis=-1)
