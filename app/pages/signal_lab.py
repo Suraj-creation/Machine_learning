@@ -184,16 +184,19 @@ def render_signal_lab():
             for ch, signal in channel_data.items():
                 f, psd = compute_psd(signal, fs)
                 if freqs is None:
-                    freqs = f
-                psd_data[ch] = psd
+                    freqs = np.array(f)  # Ensure it's a numpy array
+                psd_data[ch] = np.array(psd)  # Ensure it's a numpy array
             
-            # Filter to fmax
-            freq_mask = freqs <= fmax
-            freqs = freqs[freq_mask]
-            psd_data = {ch: psd[freq_mask] for ch, psd in psd_data.items()}
-            
-            fig = plot_psd(psd_data, freqs, selected_channels)
-            st.plotly_chart(fig, use_container_width=True)
+            if freqs is not None and len(psd_data) > 0:
+                # Filter to fmax
+                freq_mask = freqs <= fmax
+                freqs = freqs[freq_mask]
+                psd_data = {ch: psd_arr[freq_mask] for ch, psd_arr in psd_data.items()}
+                
+                fig = plot_psd(psd_data, freqs, selected_channels)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Could not compute PSD. No valid channel data.")
             
             # Show band powers
             st.markdown("##### Frequency Band Powers")

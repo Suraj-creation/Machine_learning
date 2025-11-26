@@ -29,9 +29,32 @@ def compute_psd(data: np.ndarray, sfreq: float = 500,
 
 
 def compute_band_power(psd: np.ndarray, freqs: np.ndarray, 
-                       band: List[float]) -> np.ndarray:
-    """Compute power in a specific frequency band."""
-    idx = np.where((freqs >= band[0]) & (freqs <= band[1]))[0]
+                       low_freq, high_freq=None) -> np.ndarray:
+    """Compute power in a specific frequency band.
+    
+    Args:
+        psd: Power spectral density array (can be 1D or 2D)
+        freqs: Frequency array
+        low_freq: Either lower frequency bound OR a list/tuple [low, high]
+        high_freq: Upper frequency bound (optional if low_freq is a list)
+    """
+    # Handle both calling conventions: (psd, freqs, [low, high]) or (psd, freqs, low, high)
+    if isinstance(low_freq, (list, tuple)):
+        band_low, band_high = low_freq[0], low_freq[1]
+    else:
+        band_low = low_freq
+        band_high = high_freq if high_freq is not None else low_freq + 4  # default 4 Hz band
+    
+    idx = np.where((freqs >= band_low) & (freqs <= band_high))[0]
+    
+    # Handle 1D psd array
+    psd = np.atleast_1d(psd)
+    if psd.ndim == 1:
+        if len(idx) == 0:
+            return 0.0
+        return np.trapz(psd[idx], freqs[idx])
+    
+    # Handle 2D psd array
     if len(idx) == 0:
         return np.zeros(psd.shape[0])
     return np.trapz(psd[:, idx], freqs[idx], axis=-1)

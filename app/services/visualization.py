@@ -208,24 +208,38 @@ def plot_probability_bars(probabilities: Dict[str, float],
 
 
 def plot_confusion_matrix(confusion_matrix: np.ndarray, 
-                         labels: List[str] = None) -> go.Figure:
+                         labels: List[str] = None,
+                         normalize: bool = False) -> go.Figure:
     """Create confusion matrix heatmap."""
     if labels is None:
         labels = ['AD', 'CN', 'FTD']
     
+    cm = np.array(confusion_matrix, dtype=float)
+    
+    # Normalize if requested
+    if normalize:
+        row_sums = cm.sum(axis=1, keepdims=True)
+        row_sums[row_sums == 0] = 1  # Avoid division by zero
+        cm = cm / row_sums
+        text_template = '%{text:.2%}'
+        title = 'Confusion Matrix (Normalized)'
+    else:
+        text_template = '%{text:.0f}'
+        title = 'Confusion Matrix'
+    
     fig = go.Figure(data=go.Heatmap(
-        z=confusion_matrix,
+        z=cm,
         x=labels,
         y=labels,
         colorscale='Blues',
-        text=confusion_matrix,
-        texttemplate='%{text}',
+        text=cm,
+        texttemplate=text_template,
         textfont={"size": 16},
         hoverongaps=False
     ))
     
     fig.update_layout(
-        title='Confusion Matrix',
+        title=title,
         xaxis_title='Predicted',
         yaxis_title='Actual',
         height=400
