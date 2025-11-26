@@ -8,7 +8,8 @@ from typing import Dict, List, Any
 
 # Find the config file relative to this module
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
-PROJECT_ROOT = Path(__file__).parent.parent
+# PROJECT_ROOT should be the main project directory (where app.py is)
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 
 
 @dataclass
