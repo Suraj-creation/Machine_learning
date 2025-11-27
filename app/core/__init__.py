@@ -2,7 +2,10 @@
 Core module initialization.
 """
 from .config import CONFIG, load_config, get_path, get_class_color, get_ui_color
-from .state import init_session_state, get_state, set_state
+from .state import (
+    init_session_state, get_state, set_state,
+    get_theme, set_theme, toggle_theme, navigate_to
+)
 from .types import (
     DiagnosisGroup, ConfidenceLevel, FrequencyBand, ProcessingStatus,
     PredictionResult, ValidationResult, ExtractedFeatures
@@ -41,6 +44,10 @@ __all__ = [
     "init_session_state",
     "get_state",
     "set_state",
+    "get_theme",
+    "set_theme",
+    "toggle_theme",
+    "navigate_to",
     # Types
     "DiagnosisGroup",
     "ConfidenceLevel", 
