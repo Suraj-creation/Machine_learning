@@ -66,7 +66,7 @@ init_session_state()
 if ACCESSIBILITY_ENABLED:
     init_accessibility_settings()
     apply_accessibility_styles()
-    add_skip_link()
+    # add_skip_link()  # Disabled - removes 'Skip to main content' from pages
 
 # Security checks
 if SECURITY_ENABLED:

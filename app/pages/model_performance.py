@@ -296,7 +296,7 @@ def render_model_performance():
     model = load_model()
     
     if model is not None:
-        importance_df = get_feature_importance(model)
+        importance_df = get_feature_importance()
         
         if importance_df is not None:
             # Top 20 features

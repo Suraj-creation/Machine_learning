@@ -398,13 +398,20 @@ def get_feature_importance(
     if feature_subset:
         df = df[df['feature'].isin(feature_subset)]
     
-    # Validate top_n parameter
-    if top_n is None or top_n <= 0:
-        top_n = len(df)
-    elif top_n > len(df):
-        top_n = len(df)
+    # Validate top_n parameter with robust type checking
+    try:
+        # Convert to int if it's a numpy type or other numeric type
+        top_n_int = int(top_n) if top_n is not None else len(df)
+        
+        if top_n_int <= 0:
+            top_n_int = len(df)
+        elif top_n_int > len(df):
+            top_n_int = len(df)
+    except (TypeError, ValueError):
+        # If conversion fails, use all features
+        top_n_int = len(df)
     
-    return df.head(top_n)
+    return df.head(top_n_int)
 
 
 def get_top_contributing_features(

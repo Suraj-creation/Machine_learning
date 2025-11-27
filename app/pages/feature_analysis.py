@@ -461,7 +461,7 @@ def render_importance_ranking():
     model = load_model()
     
     if model is not None:
-        importance_df = get_feature_importance(model)
+        importance_df = get_feature_importance()
         
         if importance_df is not None and len(importance_df) > 0:
             # Top features visualization
