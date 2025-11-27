@@ -172,30 +172,40 @@ def render_inference_lab():
         st.markdown("### 🔬 Classification")
         
         with st.spinner("Extracting features and running inference..."):
-            # Get EEG data (convert to µV)
-            data = raw.get_data() * 1e6
-            fs = raw.info['sfreq']
-            
-            # Average across channels
-            avg_signal = np.mean(data, axis=0)
-            
-            # Extract features
-            features = extract_all_features(avg_signal, fs)
-            
-            # Make prediction
-            prediction_result = predict_from_features_dict(features, model, scaler, label_encoder)
-            
-            if prediction_result is None:
-                st.error("Failed to make prediction. Feature mismatch with model.")
+            try:
+                # Get EEG data (convert to µV)
+                data = raw.get_data() * 1e6
+                fs = raw.info['sfreq']
+                
+                # Average across channels
+                avg_signal = np.mean(data, axis=0)
+                
+                # Extract features
+                features = extract_all_features(avg_signal, fs)
+                
+                if features is None or len(features) == 0:
+                    st.error("❌ Failed to extract features from EEG data. Please check the file format.")
+                    return
+                
+                # Make prediction
+                prediction_result = predict_from_features_dict(features, model, scaler, label_encoder)
+                
+                if prediction_result is None:
+                    st.error("❌ Failed to make prediction. Feature mismatch with model. Expected 438 features.")
+                    return
+                
+                predicted_class, probabilities, class_labels = prediction_result
+                
+                # Hierarchical diagnosis
+                hierarchical_result = hierarchical_diagnosis(probabilities, class_labels)
+                
+                # Get top contributing features
+                top_features = get_top_contributing_features(features, model, scaler, n_top=10)
+                
+            except Exception as e:
+                st.error(f"❌ Error during classification: {str(e)}")
+                st.error("Please ensure the EEG file is in a supported format (EDF, BDF, FIF, etc.)")
                 return
-            
-            predicted_class, probabilities, class_labels = prediction_result
-            
-            # Hierarchical diagnosis
-            hierarchical_result = hierarchical_diagnosis(probabilities, class_labels)
-            
-            # Get top contributing features
-            top_features = get_top_contributing_features(features, model, scaler, n_top=10)
         
         # Add to history
         add_prediction_to_history(

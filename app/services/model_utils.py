@@ -398,6 +398,12 @@ def get_feature_importance(
     if feature_subset:
         df = df[df['feature'].isin(feature_subset)]
     
+    # Validate top_n parameter
+    if top_n is None or top_n <= 0:
+        top_n = len(df)
+    elif top_n > len(df):
+        top_n = len(df)
+    
     return df.head(top_n)
 
 

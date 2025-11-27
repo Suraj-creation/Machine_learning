@@ -552,20 +552,26 @@ def plot_improvement_timeline(results_df: pd.DataFrame) -> go.Figure:
     """Create improvement timeline chart."""
     fig = go.Figure()
     
+    # Use 'Method' column if 'Experiment' doesn't exist
+    x_col = 'Experiment' if 'Experiment' in results_df.columns else 'Method'
+    # Use 'CV Accuracy' if 'Accuracy' doesn't exist
+    acc_col = 'Accuracy' if 'Accuracy' in results_df.columns else 'CV Accuracy'
+    
     # Accuracy line
-    fig.add_trace(go.Scatter(
-        x=results_df['Experiment'],
-        y=results_df['Accuracy'],
-        name='Accuracy',
-        mode='lines+markers',
-        line=dict(color=get_ui_color('primary'), width=3),
-        marker=dict(size=10)
-    ))
+    if acc_col in results_df.columns:
+        fig.add_trace(go.Scatter(
+            x=results_df[x_col],
+            y=results_df[acc_col],
+            name='Accuracy',
+            mode='lines+markers',
+            line=dict(color=get_ui_color('primary'), width=3),
+            marker=dict(size=10)
+        ))
     
     # F1 Score line
     if 'F1_Score' in results_df.columns:
         fig.add_trace(go.Scatter(
-            x=results_df['Experiment'],
+            x=results_df[x_col],
             y=results_df['F1_Score'],
             name='F1 Score',
             mode='lines+markers',
@@ -575,7 +581,7 @@ def plot_improvement_timeline(results_df: pd.DataFrame) -> go.Figure:
     
     fig.update_layout(
         title='Model Improvement Timeline',
-        xaxis_title='Experiment',
+        xaxis_title=x_col,
         yaxis_title='Score',
         yaxis_range=[0, 1],
         height=400

@@ -164,32 +164,44 @@ def render_batch_analysis():
                         if missing_ch:
                             result['Warnings'].append(f'Missing channels: {len(missing_ch)}')
                         
-                        # Extract features
-                        data = raw.get_data() * 1e6  # Convert to µV
-                        fs = raw.info['sfreq']
-                        avg_signal = np.mean(data, axis=0)
-                        
-                        features = extract_all_features(avg_signal, fs)
-                        features['filename'] = uploaded_file.name
-                        all_features.append(features)
-                        
-                        # Predict
-                        prediction_result = predict_from_features_dict(
-                            features, model, scaler, label_encoder
-                        )
-                        
-                        if prediction_result:
-                            predicted_class, probabilities, class_labels = prediction_result
+                        # Extract features with error handling
+                        try:
+                            data = raw.get_data() * 1e6  # Convert to µV
+                            fs = raw.info['sfreq']
+                            avg_signal = np.mean(data, axis=0)
                             
-                            result['Status'] = 'Success'
-                            result['Prediction'] = predicted_class
-                            result['Confidence'] = max(probabilities)
+                            features = extract_all_features(avg_signal, fs)
                             
-                            for i, label in enumerate(class_labels):
-                                result[f'{label}_Prob'] = probabilities[i]
-                        else:
+                            if features is None or len(features) == 0:
+                                result['Status'] = 'Failed'
+                                result['Warnings'].append('Feature extraction returned empty result')
+                                results.append(result)
+                                continue
+                            
+                            features['filename'] = uploaded_file.name
+                            all_features.append(features)
+                            
+                            # Predict
+                            prediction_result = predict_from_features_dict(
+                                features, model, scaler, label_encoder
+                            )
+                            
+                            if prediction_result:
+                                predicted_class, probabilities, class_labels = prediction_result
+                                
+                                result['Status'] = 'Success'
+                                result['Prediction'] = predicted_class
+                                result['Confidence'] = max(probabilities)
+                                
+                                for i, label in enumerate(class_labels):
+                                    result[f'{label}_Prob'] = probabilities[i]
+                            else:
+                                result['Status'] = 'Failed'
+                                result['Warnings'].append('Prediction failed - feature mismatch (expected 438 features)')
+                        
+                        except Exception as feat_err:
                             result['Status'] = 'Failed'
-                            result['Warnings'].append('Prediction failed - feature mismatch')
+                            result['Warnings'].append(f'Feature extraction error: {str(feat_err)}')
                         
                     finally:
                         # Clean up temp file
