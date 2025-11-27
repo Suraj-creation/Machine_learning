@@ -1,27 +1,66 @@
 """
 Visualization utilities for Streamlit app.
+
+This module provides comprehensive visualization functions for:
+- Class distributions and demographics
+- EEG signals and PSD plots
+- Model performance metrics
+- Feature importance and SHAP values
+- 3D visualizations (PCA, UMAP)
+- Topographic maps
+- Decision trees and hierarchical diagnosis
 """
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional, Any, Union
 import streamlit as st
 
 from app.core.config import CONFIG, get_class_color, get_ui_color, get_frequency_bands
+from app.core.state import get_theme
 
 
 def get_plotly_template() -> Dict:
-    """Get consistent Plotly template."""
-    return {
-        'layout': {
-            'font': {'family': 'Inter, sans-serif'},
-            'paper_bgcolor': 'rgba(0,0,0,0)',
-            'plot_bgcolor': 'rgba(0,0,0,0)',
-            'margin': {'l': 40, 'r': 40, 't': 40, 'b': 40}
+    """Get consistent Plotly template based on theme."""
+    theme = get_theme()
+    
+    if theme == "dark":
+        return {
+            'layout': {
+                'font': {'family': 'Inter, sans-serif', 'color': '#F9FAFB'},
+                'paper_bgcolor': '#1F2937',
+                'plot_bgcolor': '#1F2937',
+                'margin': {'l': 40, 'r': 40, 't': 40, 'b': 40}
+            }
         }
-    }
+    else:
+        return {
+            'layout': {
+                'font': {'family': 'Inter, sans-serif', 'color': '#1F2937'},
+                'paper_bgcolor': 'rgba(0,0,0,0)',
+                'plot_bgcolor': 'rgba(0,0,0,0)',
+                'margin': {'l': 40, 'r': 40, 't': 40, 'b': 40}
+            }
+        }
+
+
+def apply_theme_to_figure(fig: go.Figure) -> go.Figure:
+    """Apply current theme to a Plotly figure."""
+    theme = get_theme()
+    
+    if theme == "dark":
+        fig.update_layout(
+            paper_bgcolor='#1F2937',
+            plot_bgcolor='#374151',
+            font=dict(color='#F9FAFB'),
+            title_font=dict(color='#F9FAFB'),
+            xaxis=dict(gridcolor='#4B5563', tickcolor='#9CA3AF'),
+            yaxis=dict(gridcolor='#4B5563', tickcolor='#9CA3AF')
+        )
+    
+    return fig
 
 
 def plot_class_distribution(df: pd.DataFrame, column: str = 'Group') -> go.Figure:
@@ -898,3 +937,698 @@ def plot_decision_tree_visualization(hierarchical_result: Dict) -> go.Figure:
     )
     
     return fig
+
+
+# ==================== SHAP VISUALIZATIONS ====================
+
+def plot_shap_waterfall(
+    feature_values: Dict[str, float],
+    shap_values: Dict[str, float],
+    base_value: float = 0.5,
+    prediction: str = "",
+    top_n: int = 15
+) -> go.Figure:
+    """
+    Create a SHAP waterfall plot showing feature contributions.
+    
+    Args:
+        feature_values: Dictionary of feature names to their values
+        shap_values: Dictionary of feature names to their SHAP values
+        base_value: The base/expected value (average prediction)
+        prediction: The predicted class
+        top_n: Number of top features to show
+        
+    Returns:
+        Plotly figure
+    """
+    # Sort by absolute SHAP value
+    sorted_features = sorted(
+        shap_values.items(), 
+        key=lambda x: abs(x[1]), 
+        reverse=True
+    )[:top_n]
+    
+    features = [f[0] for f in sorted_features]
+    values = [f[1] for f in sorted_features]
+    
+    # Calculate cumulative positions
+    cumulative = [base_value]
+    for v in values:
+        cumulative.append(cumulative[-1] + v)
+    
+    fig = go.Figure()
+    
+    # Add waterfall bars
+    for i, (feat, val) in enumerate(zip(features, values)):
+        color = '#FF6B6B' if val < 0 else '#51CF66'
+        
+        fig.add_trace(go.Bar(
+            x=[val],
+            y=[feat],
+            orientation='h',
+            marker_color=color,
+            showlegend=False,
+            text=[f'{val:+.3f}'],
+            textposition='outside',
+            hovertemplate=f'{feat}<br>SHAP: {val:+.4f}<br>Value: {feature_values.get(feat, "N/A")}<extra></extra>'
+        ))
+    
+    # Add base value line
+    fig.add_vline(x=0, line_dash="dash", line_color="gray")
+    
+    # Final prediction marker
+    final_value = cumulative[-1]
+    fig.add_annotation(
+        x=final_value,
+        y=features[-1],
+        text=f"f(x) = {final_value:.3f}",
+        showarrow=True,
+        arrowhead=2
+    )
+    
+    fig.update_layout(
+        title=f'SHAP Feature Contributions → {prediction}',
+        xaxis_title='SHAP Value (impact on model output)',
+        yaxis_title='Feature',
+        height=max(400, top_n * 30),
+        margin=dict(l=200),
+        yaxis=dict(autorange='reversed')
+    )
+    
+    return apply_theme_to_figure(fig)
+
+
+def plot_shap_summary(
+    shap_df: pd.DataFrame,
+    top_n: int = 20
+) -> go.Figure:
+    """
+    Create a SHAP summary plot (beeswarm-style).
+    
+    Args:
+        shap_df: DataFrame with columns ['feature', 'shap_value', 'feature_value']
+        top_n: Number of top features to show
+        
+    Returns:
+        Plotly figure
+    """
+    if shap_df.empty:
+        return go.Figure().update_layout(title="No SHAP data available")
+    
+    # Get top features by mean absolute SHAP
+    feature_importance = shap_df.groupby('feature')['shap_value'].apply(
+        lambda x: np.mean(np.abs(x))
+    ).sort_values(ascending=False).head(top_n)
+    
+    top_features = feature_importance.index.tolist()
+    
+    fig = go.Figure()
+    
+    for i, feat in enumerate(reversed(top_features)):
+        feat_data = shap_df[shap_df['feature'] == feat]
+        
+        # Normalize feature values for color
+        feat_vals = feat_data['feature_value']
+        norm_vals = (feat_vals - feat_vals.min()) / (feat_vals.max() - feat_vals.min() + 1e-10)
+        
+        fig.add_trace(go.Scatter(
+            x=feat_data['shap_value'],
+            y=[i + np.random.uniform(-0.2, 0.2) for _ in range(len(feat_data))],
+            mode='markers',
+            marker=dict(
+                size=6,
+                color=norm_vals,
+                colorscale='RdBu_r',
+                opacity=0.6
+            ),
+            name=feat,
+            hovertemplate=f'{feat}<br>SHAP: %{{x:.4f}}<br>Value: %{{customdata:.4f}}<extra></extra>',
+            customdata=feat_data['feature_value'],
+            showlegend=False
+        ))
+    
+    # Add zero line
+    fig.add_vline(x=0, line_dash="dash", line_color="gray")
+    
+    fig.update_layout(
+        title='SHAP Summary Plot',
+        xaxis_title='SHAP Value (impact on model output)',
+        yaxis=dict(
+            tickmode='array',
+            tickvals=list(range(len(top_features))),
+            ticktext=list(reversed(top_features))
+        ),
+        height=max(400, top_n * 25),
+        margin=dict(l=200)
+    )
+    
+    return apply_theme_to_figure(fig)
+
+
+def plot_shap_force_plot(
+    base_value: float,
+    shap_values: Dict[str, float],
+    feature_values: Dict[str, float],
+    prediction: str = "",
+    top_n: int = 10
+) -> go.Figure:
+    """
+    Create a horizontal force plot showing feature contributions.
+    
+    Args:
+        base_value: The expected/base value
+        shap_values: Dictionary of feature SHAP values
+        feature_values: Dictionary of feature values
+        prediction: Predicted class
+        top_n: Number of features to show
+        
+    Returns:
+        Plotly figure
+    """
+    # Sort by absolute value and take top N
+    sorted_items = sorted(shap_values.items(), key=lambda x: abs(x[1]), reverse=True)[:top_n]
+    
+    # Separate positive and negative
+    positive = [(f, v) for f, v in sorted_items if v > 0]
+    negative = [(f, v) for f, v in sorted_items if v < 0]
+    
+    fig = go.Figure()
+    
+    # Base value
+    current_pos = base_value
+    
+    # Draw positive contributions (pushing right)
+    for feat, val in positive:
+        fig.add_trace(go.Bar(
+            x=[val],
+            y=['Output'],
+            orientation='h',
+            base=[current_pos],
+            marker_color='#FF6B6B',
+            name=feat,
+            text=[feat],
+            hovertemplate=f'{feat}: {val:+.4f}<br>Value: {feature_values.get(feat, "N/A")}<extra></extra>'
+        ))
+    
+    # Draw negative contributions (pushing left)
+    neg_pos = base_value
+    for feat, val in negative:
+        neg_pos += val
+    
+    for feat, val in negative:
+        fig.add_trace(go.Bar(
+            x=[abs(val)],
+            y=['Output'],
+            orientation='h',
+            base=[neg_pos],
+            marker_color='#51CF66',
+            name=feat,
+            hovertemplate=f'{feat}: {val:+.4f}<br>Value: {feature_values.get(feat, "N/A")}<extra></extra>'
+        ))
+        neg_pos += abs(val)
+    
+    # Final value marker
+    final_val = base_value + sum(shap_values.values())
+    
+    fig.add_vline(x=final_val, line_color="#1E3A8A", line_width=3)
+    fig.add_annotation(
+        x=final_val, y='Output', text=f'f(x) = {final_val:.3f}',
+        showarrow=True, arrowhead=2, yshift=30
+    )
+    
+    fig.update_layout(
+        title=f'SHAP Force Plot → {prediction}',
+        xaxis_title='Model Output',
+        showlegend=True,
+        height=200,
+        barmode='stack'
+    )
+    
+    return apply_theme_to_figure(fig)
+
+
+# ==================== 3D VISUALIZATIONS ====================
+
+def plot_3d_pca(
+    features_df: pd.DataFrame,
+    labels: List[str],
+    n_components: int = 3,
+    title: str = "3D PCA Visualization"
+) -> go.Figure:
+    """
+    Create an interactive 3D PCA scatter plot.
+    
+    Args:
+        features_df: DataFrame with feature columns
+        labels: List of class labels for each sample
+        n_components: Number of PCA components (must be 3)
+        title: Plot title
+        
+    Returns:
+        Plotly figure
+    """
+    from sklearn.decomposition import PCA
+    from sklearn.preprocessing import StandardScaler
+    
+    # Standardize features
+    scaler = StandardScaler()
+    scaled_data = scaler.fit_transform(features_df)
+    
+    # Apply PCA
+    pca = PCA(n_components=n_components)
+    pca_result = pca.fit_transform(scaled_data)
+    
+    # Create DataFrame for plotting
+    plot_df = pd.DataFrame({
+        'PC1': pca_result[:, 0],
+        'PC2': pca_result[:, 1],
+        'PC3': pca_result[:, 2],
+        'Label': labels
+    })
+    
+    # Color mapping
+    color_map = {
+        'AD': get_class_color('AD'),
+        'CN': get_class_color('CN'),
+        'FTD': get_class_color('FTD')
+    }
+    
+    fig = go.Figure()
+    
+    for label in plot_df['Label'].unique():
+        mask = plot_df['Label'] == label
+        fig.add_trace(go.Scatter3d(
+            x=plot_df[mask]['PC1'],
+            y=plot_df[mask]['PC2'],
+            z=plot_df[mask]['PC3'],
+            mode='markers',
+            name=label,
+            marker=dict(
+                size=6,
+                color=color_map.get(label, '#808080'),
+                opacity=0.8,
+                line=dict(width=1, color='white')
+            ),
+            hovertemplate=f'{label}<br>PC1: %{{x:.2f}}<br>PC2: %{{y:.2f}}<br>PC3: %{{z:.2f}}<extra></extra>'
+        ))
+    
+    # Explained variance in axis labels
+    exp_var = pca.explained_variance_ratio_
+    
+    fig.update_layout(
+        title=title,
+        scene=dict(
+            xaxis_title=f'PC1 ({exp_var[0]:.1%} var)',
+            yaxis_title=f'PC2 ({exp_var[1]:.1%} var)',
+            zaxis_title=f'PC3 ({exp_var[2]:.1%} var)',
+            camera=dict(eye=dict(x=1.5, y=1.5, z=1.0))
+        ),
+        height=600,
+        margin=dict(l=0, r=0, t=40, b=0)
+    )
+    
+    return apply_theme_to_figure(fig)
+
+
+def plot_3d_umap(
+    features_df: pd.DataFrame,
+    labels: List[str],
+    n_neighbors: int = 15,
+    min_dist: float = 0.1,
+    title: str = "3D UMAP Visualization"
+) -> go.Figure:
+    """
+    Create an interactive 3D UMAP scatter plot.
+    
+    Args:
+        features_df: DataFrame with feature columns
+        labels: List of class labels
+        n_neighbors: UMAP n_neighbors parameter
+        min_dist: UMAP min_dist parameter
+        title: Plot title
+        
+    Returns:
+        Plotly figure
+    """
+    try:
+        import umap
+    except ImportError:
+        # Return placeholder if UMAP not installed
+        fig = go.Figure()
+        fig.add_annotation(
+            text="UMAP not installed. Install with: pip install umap-learn",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False
+        )
+        fig.update_layout(title=title, height=400)
+        return fig
+    
+    from sklearn.preprocessing import StandardScaler
+    
+    # Standardize
+    scaler = StandardScaler()
+    scaled_data = scaler.fit_transform(features_df)
+    
+    # Apply UMAP
+    reducer = umap.UMAP(n_components=3, n_neighbors=n_neighbors, min_dist=min_dist, random_state=42)
+    umap_result = reducer.fit_transform(scaled_data)
+    
+    # Create plot DataFrame
+    plot_df = pd.DataFrame({
+        'UMAP1': umap_result[:, 0],
+        'UMAP2': umap_result[:, 1],
+        'UMAP3': umap_result[:, 2],
+        'Label': labels
+    })
+    
+    color_map = {
+        'AD': get_class_color('AD'),
+        'CN': get_class_color('CN'),
+        'FTD': get_class_color('FTD')
+    }
+    
+    fig = go.Figure()
+    
+    for label in plot_df['Label'].unique():
+        mask = plot_df['Label'] == label
+        fig.add_trace(go.Scatter3d(
+            x=plot_df[mask]['UMAP1'],
+            y=plot_df[mask]['UMAP2'],
+            z=plot_df[mask]['UMAP3'],
+            mode='markers',
+            name=label,
+            marker=dict(
+                size=6,
+                color=color_map.get(label, '#808080'),
+                opacity=0.8
+            )
+        ))
+    
+    fig.update_layout(
+        title=title,
+        scene=dict(
+            xaxis_title='UMAP 1',
+            yaxis_title='UMAP 2',
+            zaxis_title='UMAP 3'
+        ),
+        height=600
+    )
+    
+    return apply_theme_to_figure(fig)
+
+
+def plot_3d_tsne(
+    features_df: pd.DataFrame,
+    labels: List[str],
+    perplexity: float = 30,
+    title: str = "3D t-SNE Visualization"
+) -> go.Figure:
+    """
+    Create an interactive 3D t-SNE scatter plot.
+    
+    Args:
+        features_df: DataFrame with feature columns
+        labels: List of class labels
+        perplexity: t-SNE perplexity parameter
+        title: Plot title
+        
+    Returns:
+        Plotly figure
+    """
+    from sklearn.manifold import TSNE
+    from sklearn.preprocessing import StandardScaler
+    
+    # Standardize
+    scaler = StandardScaler()
+    scaled_data = scaler.fit_transform(features_df)
+    
+    # Apply t-SNE
+    tsne = TSNE(n_components=3, perplexity=perplexity, random_state=42, n_iter=1000)
+    tsne_result = tsne.fit_transform(scaled_data)
+    
+    plot_df = pd.DataFrame({
+        'tSNE1': tsne_result[:, 0],
+        'tSNE2': tsne_result[:, 1],
+        'tSNE3': tsne_result[:, 2],
+        'Label': labels
+    })
+    
+    color_map = {
+        'AD': get_class_color('AD'),
+        'CN': get_class_color('CN'),
+        'FTD': get_class_color('FTD')
+    }
+    
+    fig = go.Figure()
+    
+    for label in plot_df['Label'].unique():
+        mask = plot_df['Label'] == label
+        fig.add_trace(go.Scatter3d(
+            x=plot_df[mask]['tSNE1'],
+            y=plot_df[mask]['tSNE2'],
+            z=plot_df[mask]['tSNE3'],
+            mode='markers',
+            name=label,
+            marker=dict(
+                size=6,
+                color=color_map.get(label, '#808080'),
+                opacity=0.8
+            )
+        ))
+    
+    fig.update_layout(
+        title=title,
+        scene=dict(
+            xaxis_title='t-SNE 1',
+            yaxis_title='t-SNE 2',
+            zaxis_title='t-SNE 3'
+        ),
+        height=600
+    )
+    
+    return apply_theme_to_figure(fig)
+
+
+# ==================== ANIMATED VISUALIZATIONS ====================
+
+def create_animated_progress(
+    current: int,
+    total: int,
+    label: str = "Processing"
+) -> str:
+    """
+    Create HTML for animated progress indicator.
+    
+    Args:
+        current: Current progress value
+        total: Total value
+        label: Progress label
+        
+    Returns:
+        HTML string
+    """
+    percentage = (current / total) * 100 if total > 0 else 0
+    
+    return f"""
+    <div style="margin: 1rem 0;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+            <span style="font-weight: 500;">{label}</span>
+            <span style="color: #6B7280;">{current}/{total} ({percentage:.0f}%)</span>
+        </div>
+        <div style="background: #E5E7EB; border-radius: 9999px; height: 8px; overflow: hidden;">
+            <div style="
+                background: linear-gradient(90deg, #1E3A8A, #60A5FA);
+                height: 100%;
+                width: {percentage}%;
+                border-radius: 9999px;
+                transition: width 0.3s ease;
+                animation: progressPulse 2s ease-in-out infinite;
+            "></div>
+        </div>
+    </div>
+    <style>
+        @keyframes progressPulse {{
+            0%, 100% {{ opacity: 1; }}
+            50% {{ opacity: 0.7; }}
+        }}
+    </style>
+    """
+
+
+def plot_animated_brain(
+    channel_values: Dict[str, float],
+    title: str = "EEG Activity"
+) -> go.Figure:
+    """
+    Create an animated brain topomap with pulsing activity.
+    
+    Args:
+        channel_values: Dictionary of channel values
+        title: Plot title
+        
+    Returns:
+        Plotly figure with animation frames
+    """
+    # Get base topomap
+    fig = plot_topomap(channel_values, title)
+    
+    # Add animation frames (simple scaling effect)
+    frames = []
+    
+    for i in range(10):
+        scale = 1.0 + 0.05 * np.sin(i * np.pi / 5)
+        
+        frame_data = []
+        for trace in fig.data:
+            if hasattr(trace, 'marker') and trace.marker is not None:
+                new_trace = go.Scatter(
+                    x=trace.x,
+                    y=trace.y,
+                    mode=trace.mode,
+                    marker=dict(
+                        size=[s * scale for s in (trace.marker.size if isinstance(trace.marker.size, list) else [trace.marker.size])] if trace.marker.size else None,
+                        color=trace.marker.color,
+                        colorscale=trace.marker.colorscale if hasattr(trace.marker, 'colorscale') else None
+                    )
+                )
+                frame_data.append(new_trace)
+            else:
+                frame_data.append(trace)
+        
+        frames.append(go.Frame(data=frame_data, name=str(i)))
+    
+    fig.frames = frames
+    
+    # Add play button
+    fig.update_layout(
+        updatemenus=[
+            dict(
+                type='buttons',
+                showactive=False,
+                y=0,
+                x=0.1,
+                xanchor='right',
+                buttons=[
+                    dict(
+                        label='Play',
+                        method='animate',
+                        args=[None, dict(frame=dict(duration=100, redraw=True), fromcurrent=True)]
+                    )
+                ]
+            )
+        ]
+    )
+    
+    return fig
+
+
+# ==================== ENHANCED TOPOMAPS ====================
+
+def plot_topomap_with_interpolation(
+    channel_values: Dict[str, float],
+    title: str = "Topographic Map",
+    resolution: int = 100
+) -> go.Figure:
+    """
+    Create a topographic map with interpolated heatmap.
+    
+    Args:
+        channel_values: Dictionary of channel values
+        title: Plot title
+        resolution: Grid resolution for interpolation
+        
+    Returns:
+        Plotly figure
+    """
+    from scipy.interpolate import griddata
+    import math
+    
+    # Electrode positions
+    electrode_positions = {
+        'Fp1': (-0.3, 0.9), 'Fp2': (0.3, 0.9),
+        'F7': (-0.7, 0.6), 'F3': (-0.35, 0.6), 'Fz': (0, 0.6),
+        'F4': (0.35, 0.6), 'F8': (0.7, 0.6),
+        'T3': (-0.9, 0), 'C3': (-0.45, 0), 'Cz': (0, 0),
+        'C4': (0.45, 0), 'T4': (0.9, 0),
+        'T5': (-0.7, -0.6), 'P3': (-0.35, -0.6), 'Pz': (0, -0.6),
+        'P4': (0.35, -0.6), 'T6': (0.7, -0.6),
+        'O1': (-0.3, -0.9), 'O2': (0.3, -0.9)
+    }
+    
+    # Extract known values
+    x_vals, y_vals, z_vals = [], [], []
+    for ch, (x, y) in electrode_positions.items():
+        if ch in channel_values:
+            x_vals.append(x)
+            y_vals.append(y)
+            z_vals.append(channel_values[ch])
+    
+    if len(z_vals) < 3:
+        return plot_topomap(channel_values, title)
+    
+    # Create interpolation grid
+    xi = np.linspace(-1, 1, resolution)
+    yi = np.linspace(-1, 1, resolution)
+    xi, yi = np.meshgrid(xi, yi)
+    
+    # Interpolate
+    zi = griddata((x_vals, y_vals), z_vals, (xi, yi), method='cubic')
+    
+    # Mask outside head
+    mask = xi**2 + yi**2 > 0.95**2
+    zi[mask] = np.nan
+    
+    fig = go.Figure()
+    
+    # Add heatmap
+    fig.add_trace(go.Heatmap(
+        z=zi,
+        x=np.linspace(-1, 1, resolution),
+        y=np.linspace(-1, 1, resolution),
+        colorscale='RdBu_r',
+        showscale=True,
+        colorbar=dict(title='Power'),
+        hoverinfo='z'
+    ))
+    
+    # Add head outline
+    theta_vals = np.linspace(0, 2*np.pi, 100)
+    head_x = 0.95 * np.cos(theta_vals)
+    head_y = 0.95 * np.sin(theta_vals)
+    
+    fig.add_trace(go.Scatter(
+        x=head_x, y=head_y,
+        mode='lines',
+        line=dict(color='#1E3A8A', width=3),
+        showlegend=False,
+        hoverinfo='skip'
+    ))
+    
+    # Add electrode markers
+    fig.add_trace(go.Scatter(
+        x=x_vals, y=y_vals,
+        mode='markers+text',
+        marker=dict(size=8, color='black'),
+        text=list(electrode_positions.keys())[:len(x_vals)],
+        textposition='top center',
+        textfont=dict(size=8),
+        showlegend=False
+    ))
+    
+    # Add nose
+    fig.add_trace(go.Scatter(
+        x=[0], y=[1.05],
+        mode='markers',
+        marker=dict(symbol='triangle-up', size=12, color='#1E3A8A'),
+        showlegend=False
+    ))
+    
+    fig.update_layout(
+        title=title,
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.2, 1.2], scaleanchor='y'),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False, range=[-1.2, 1.2]),
+        height=500,
+        width=500
+    )
+    
+    return apply_theme_to_figure(fig)

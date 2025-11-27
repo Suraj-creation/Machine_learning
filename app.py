@@ -2,6 +2,13 @@
 EEG-Based Alzheimer's Disease Classification Web Application
 
 Main entry point for the Streamlit application.
+
+This application provides:
+- EEG signal exploration and analysis
+- Feature extraction and visualization
+- ML-based classification (AD/CN/FTD)
+- Batch processing capabilities
+- Comprehensive model performance metrics
 """
 import streamlit as st
 from streamlit_option_menu import option_menu
@@ -11,10 +18,38 @@ from pathlib import Path
 # Add app to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from app.core.state import init_session_state
+from app.core.state import init_session_state, get_theme, toggle_theme, navigate_to
 from app.core.config import CONFIG, get_ui_color, get_class_color
 from app.services.data_access import load_participants, get_dataset_stats
 from app.services.model_utils import get_class_labels
+from app.components.ui import apply_custom_css, metric_card, page_header
+
+# Security imports (conditionally to avoid errors on missing dependencies)
+try:
+    from app.core.security import (
+        session_timeout_guard, render_security_status, 
+        show_consent_dialog, get_security_config
+    )
+    SECURITY_ENABLED = True
+except ImportError:
+    SECURITY_ENABLED = False
+
+# Performance imports
+try:
+    from app.core.performance import display_performance_stats
+    PERFORMANCE_ENABLED = True
+except ImportError:
+    PERFORMANCE_ENABLED = False
+
+# Accessibility imports
+try:
+    from app.core.accessibility import (
+        apply_accessibility_styles, render_accessibility_panel,
+        init_accessibility_settings, add_skip_link
+    )
+    ACCESSIBILITY_ENABLED = True
+except ImportError:
+    ACCESSIBILITY_ENABLED = False
 
 # Page config must be first Streamlit command
 st.set_page_config(
@@ -27,90 +62,208 @@ st.set_page_config(
 # Initialize session state
 init_session_state()
 
-# Custom CSS
+# Initialize accessibility settings
+if ACCESSIBILITY_ENABLED:
+    init_accessibility_settings()
+    apply_accessibility_styles()
+    add_skip_link()
+
+# Security checks
+if SECURITY_ENABLED:
+    # Show consent dialog if required
+    config = get_security_config()
+    if config.gdpr_consent_required:
+        show_consent_dialog()
+    
+    # Check session timeout
+    session_timeout_guard()
+
+# Apply custom CSS (from components)
+apply_custom_css()
+
+# Additional app-specific CSS
+def get_theme_css() -> str:
+    """Get theme-specific CSS."""
+    theme = get_theme()
+    
+    if theme == "dark":
+        return """
+        <style>
+            /* Dark mode overrides */
+            :root {
+                --bg-primary: #1F2937;
+                --bg-secondary: #111827;
+                --text-primary: #F9FAFB;
+                --text-secondary: #9CA3AF;
+                --border-color: #374151;
+            }
+            
+            .main {
+                background-color: var(--bg-secondary);
+            }
+            
+            h1, h2, h3, h4, h5, h6 {
+                color: var(--text-primary) !important;
+            }
+            
+            .custom-card {
+                background: var(--bg-primary) !important;
+                border-color: var(--border-color) !important;
+            }
+            
+            .metric-value {
+                color: #60A5FA !important;
+            }
+            
+            .metric-label {
+                color: var(--text-secondary) !important;
+            }
+            
+            .hero {
+                background: linear-gradient(135deg, #1E3A8A, #3B82F6) !important;
+            }
+            
+            .card {
+                background: var(--bg-primary) !important;
+                color: var(--text-primary) !important;
+            }
+            
+            p, span, li {
+                color: var(--text-secondary);
+            }
+            
+            /* Streamlit dark overrides */
+            .stApp {
+                background-color: var(--bg-secondary);
+            }
+        </style>
+        """
+    else:
+        return """
+        <style>
+            /* Light mode (default) */
+            .main {
+                background-color: #F9FAFB;
+            }
+            
+            h1, h2, h3 {
+                color: #1E3A8A;
+            }
+            
+            /* Metric cards */
+            .metric-card {
+                background: linear-gradient(135deg, #1E3A8A10, #60A5FA10);
+                border-left: 4px solid #1E3A8A;
+                padding: 1rem;
+                border-radius: 8px;
+                margin: 0.5rem 0;
+            }
+            
+            /* Class badges */
+            .badge-ad {
+                background-color: #FF6B6B;
+                color: white;
+                padding: 0.25rem 0.75rem;
+                border-radius: 9999px;
+                font-size: 0.875rem;
+                font-weight: 600;
+            }
+            
+            .badge-cn {
+                background-color: #51CF66;
+                color: white;
+                padding: 0.25rem 0.75rem;
+                border-radius: 9999px;
+                font-size: 0.875rem;
+                font-weight: 600;
+            }
+            
+            .badge-ftd {
+                background-color: #339AF0;
+                color: white;
+                padding: 0.25rem 0.75rem;
+                border-radius: 9999px;
+                font-size: 0.875rem;
+                font-weight: 600;
+            }
+            
+            /* Hero section */
+            .hero {
+                background: linear-gradient(135deg, #1E3A8A, #60A5FA);
+                color: white;
+                padding: 2rem;
+                border-radius: 12px;
+                margin-bottom: 2rem;
+            }
+            
+            /* Cards */
+            .card {
+                background: white;
+                padding: 1.5rem;
+                border-radius: 8px;
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+                margin-bottom: 1rem;
+            }
+            
+            /* Sidebar */
+            .css-1d391kg {
+                background-color: #F3F4F6;
+            }
+        </style>
+        """
+
+# Apply theme CSS
+st.markdown(get_theme_css(), unsafe_allow_html=True)
+
+# Additional global CSS (always applied)
 st.markdown("""
 <style>
-    /* Main container */
-    .main {
-        background-color: #F9FAFB;
-    }
-    
-    /* Headers */
-    h1, h2, h3 {
-        color: #1E3A8A;
-    }
-    
-    /* Metric cards */
-    .metric-card {
-        background: linear-gradient(135deg, #1E3A8A10, #60A5FA10);
-        border-left: 4px solid #1E3A8A;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 0.5rem 0;
-    }
-    
-    /* Class badges */
-    .badge-ad {
-        background-color: #FF6B6B;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 9999px;
-        font-size: 0.875rem;
-        font-weight: 600;
-    }
-    
-    .badge-cn {
-        background-color: #51CF66;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 9999px;
-        font-size: 0.875rem;
-        font-weight: 600;
-    }
-    
-    .badge-ftd {
-        background-color: #339AF0;
-        color: white;
-        padding: 0.25rem 0.75rem;
-        border-radius: 9999px;
-        font-size: 0.875rem;
-        font-weight: 600;
-    }
-    
-    /* Hero section */
-    .hero {
-        background: linear-gradient(135deg, #1E3A8A, #60A5FA);
-        color: white;
-        padding: 2rem;
-        border-radius: 12px;
-        margin-bottom: 2rem;
-    }
-    
-    /* Cards */
-    .card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 8px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        margin-bottom: 1rem;
-    }
-    
-    /* Sidebar */
-    .css-1d391kg {
-        background-color: #F3F4F6;
-    }
-    
     /* Hide Streamlit branding */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
+    
+    /* Smooth transitions */
+    * {
+        transition: background-color 0.3s ease, color 0.3s ease;
+    }
+    
+    /* Keyboard shortcut hints */
+    .kbd {
+        background-color: #E5E7EB;
+        border: 1px solid #D1D5DB;
+        border-radius: 4px;
+        padding: 2px 6px;
+        font-family: monospace;
+        font-size: 0.75rem;
+    }
+    
+    /* Loading animation */
+    @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+    
+    .loading {
+        animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 
 def render_sidebar():
-    """Render the sidebar navigation."""
+    """Render the sidebar navigation with theme toggle."""
     with st.sidebar:
-        st.markdown("## 🧠 EEG Analysis")
+        # Header with theme toggle
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.markdown("## 🧠 EEG Analysis")
+        with col2:
+            theme = get_theme()
+            theme_icon = "🌙" if theme == "light" else "☀️"
+            if st.button(theme_icon, key="theme_toggle", help="Toggle dark/light mode"):
+                toggle_theme()
+                st.rerun()
+        
         st.markdown("---")
         
         selected = option_menu(
@@ -153,12 +306,38 @@ def render_sidebar():
             }
         )
         
+        # Track navigation for analytics
+        navigate_to(selected)
+        
         st.markdown("---")
+        
+        # Keyboard shortcuts help
+        with st.expander("⌨️ Keyboard Shortcuts"):
+            st.markdown("""
+            - <kbd class="kbd">H</kbd> - Go to Home
+            - <kbd class="kbd">D</kbd> - Dataset Explorer
+            - <kbd class="kbd">S</kbd> - Signal Lab
+            - <kbd class="kbd">I</kbd> - Inference Lab
+            - <kbd class="kbd">T</kbd> - Toggle theme
+            """, unsafe_allow_html=True)
+        
+        # Security status (if enabled)
+        if SECURITY_ENABLED:
+            render_security_status()
+        
+        # Accessibility panel (if enabled)
+        if ACCESSIBILITY_ENABLED:
+            render_accessibility_panel()
+        
+        # Performance stats (if enabled)
+        if PERFORMANCE_ENABLED:
+            display_performance_stats()
+        
         st.markdown("""
-        <div style="text-align: center; color: #6B7280; font-size: 0.75rem;">
+        <div style="text-align: center; color: #6B7280; font-size: 0.75rem; margin-top: 1rem;">
             <p>OpenNeuro ds004504</p>
             <p>88 Subjects | 19 Channels</p>
-            <p>v1.0.0</p>
+            <p>v1.2.0</p>
         </div>
         """, unsafe_allow_html=True)
         

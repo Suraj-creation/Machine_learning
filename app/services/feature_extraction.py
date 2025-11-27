@@ -1,31 +1,112 @@
 """
 Feature extraction module - ports notebook logic for 438-feature extraction.
+
+Optimized with:
+- Caching for repeated computations
+- Vectorized operations where possible
+- Memory-efficient batch processing
 """
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
 from scipy import signal
 from scipy.stats import skew, kurtosis
 import streamlit as st
+import functools
+import hashlib
 
 from app.core.config import CONFIG, get_frequency_bands, get_channels, get_regions
 
 
+# =============================================================================
+# Caching Utilities
+# =============================================================================
+
+def _compute_data_hash(data: np.ndarray) -> str:
+    """Compute a hash for numpy array data."""
+    return hashlib.md5(data.tobytes()).hexdigest()[:16]
+
+
+def _cache_key(data: np.ndarray, sfreq: float, extra: str = "") -> str:
+    """Generate cache key for feature extraction."""
+    data_hash = _compute_data_hash(data)
+    return f"{data_hash}_{sfreq}_{extra}"
+
+
+# Use session state as simple cache
+def _get_cache(key: str) -> Optional[Any]:
+    """Get from session state cache."""
+    cache = st.session_state.get('_feature_cache', {})
+    return cache.get(key)
+
+
+def _set_cache(key: str, value: Any):
+    """Set in session state cache (limited size)."""
+    if '_feature_cache' not in st.session_state:
+        st.session_state['_feature_cache'] = {}
+    
+    cache = st.session_state['_feature_cache']
+    
+    # Limit cache size
+    if len(cache) > 50:
+        # Remove oldest entries
+        keys = list(cache.keys())[:25]
+        for k in keys:
+            del cache[k]
+    
+    cache[key] = value
+
+
+# =============================================================================
+# Core PSD Functions (Optimized)
+# =============================================================================
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def _cached_welch(data_bytes: bytes, shape: tuple, sfreq: float, nperseg: int) -> Tuple:
+    """Cached Welch computation (takes bytes for hashability)."""
+    data = np.frombuffer(data_bytes, dtype=np.float64).reshape(shape)
+    freqs, psd = signal.welch(data, fs=sfreq, nperseg=nperseg, 
+                               noverlap=nperseg//2, axis=-1)
+    return freqs, psd
+
+
 def compute_psd(data: np.ndarray, sfreq: float = 500, 
-                nperseg: int = 1024) -> Tuple[np.ndarray, np.ndarray]:
+                nperseg: int = 1024, use_cache: bool = True) -> Tuple[np.ndarray, np.ndarray]:
     """
     Compute Power Spectral Density using Welch's method.
+    
+    Optimized with caching for repeated computations.
     
     Args:
         data: EEG data array (n_channels, n_samples)
         sfreq: Sampling frequency
         nperseg: Segment length for Welch
+        use_cache: Whether to use caching (default True)
         
     Returns:
         Tuple of (frequencies, psd_values)
     """
-    freqs, psd = signal.welch(data, fs=sfreq, nperseg=nperseg, 
-                               noverlap=nperseg//2, axis=-1)
-    return freqs, psd
+    # For small arrays or when cache disabled, compute directly
+    data = np.asarray(data, dtype=np.float64)
+    
+    if not use_cache or data.nbytes < 10000:  # < 10KB
+        freqs, psd = signal.welch(data, fs=sfreq, nperseg=nperseg, 
+                                   noverlap=nperseg//2, axis=-1)
+        return freqs, psd
+    
+    # Try cached computation
+    try:
+        freqs, psd = _cached_welch(
+            data.tobytes(), 
+            data.shape, 
+            sfreq, 
+            nperseg
+        )
+        return freqs, psd
+    except Exception:
+        # Fallback to direct computation
+        freqs, psd = signal.welch(data, fs=sfreq, nperseg=nperseg, 
+                                   noverlap=nperseg//2, axis=-1)
+        return freqs, psd
 
 
 def compute_band_power(psd: np.ndarray, freqs: np.ndarray, 
@@ -283,9 +364,12 @@ def extract_all_features(data: np.ndarray, sfreq: float = 500,
 def extract_epoch_features(data: np.ndarray, sfreq: float = 500,
                           window_sec: float = 2.0, overlap: float = 0.5,
                           channel_names: List[str] = None,
-                          max_epochs: int = 50) -> List[Dict[str, float]]:
+                          max_epochs: int = 50,
+                          progress_callback: Optional[callable] = None) -> List[Dict[str, float]]:
     """
     Extract features from sliding window epochs.
+    
+    Optimized for memory efficiency with optional progress tracking.
     
     Args:
         data: EEG data (n_channels, n_samples)
@@ -294,6 +378,7 @@ def extract_epoch_features(data: np.ndarray, sfreq: float = 500,
         overlap: Overlap fraction (0-1)
         channel_names: Channel names
         max_epochs: Maximum epochs to extract
+        progress_callback: Optional callback(current, total) for progress updates
         
     Returns:
         List of feature dictionaries, one per epoch
@@ -301,6 +386,12 @@ def extract_epoch_features(data: np.ndarray, sfreq: float = 500,
     n_samples = data.shape[-1]
     window_samples = int(window_sec * sfreq)
     step_samples = int(window_samples * (1 - overlap))
+    
+    # Pre-calculate number of epochs
+    total_epochs = min(
+        max_epochs,
+        (n_samples - window_samples) // step_samples + 1
+    )
     
     epoch_features = []
     start = 0
@@ -310,10 +401,81 @@ def extract_epoch_features(data: np.ndarray, sfreq: float = 500,
         features = extract_all_features(epoch_data, sfreq, channel_names)
         features['epoch_start'] = start / sfreq
         features['epoch_end'] = (start + window_samples) / sfreq
+        features['epoch_index'] = len(epoch_features)
         epoch_features.append(features)
+        
+        # Progress callback
+        if progress_callback:
+            progress_callback(len(epoch_features), total_epochs)
+        
         start += step_samples
     
     return epoch_features
+
+
+def extract_features_batch(
+    data_list: List[np.ndarray],
+    sfreq: float = 500,
+    channel_names: List[str] = None,
+    n_jobs: int = 1,
+    progress_callback: Optional[callable] = None
+) -> List[Dict[str, float]]:
+    """
+    Extract features from multiple EEG segments in batch.
+    
+    Optimized for processing multiple files/segments efficiently.
+    
+    Args:
+        data_list: List of EEG data arrays
+        sfreq: Sampling frequency
+        channel_names: Channel names
+        n_jobs: Number of parallel jobs (1 = sequential)
+        progress_callback: Optional callback(current, total)
+    
+    Returns:
+        List of feature dictionaries
+    """
+    results = []
+    total = len(data_list)
+    
+    if n_jobs == 1:
+        # Sequential processing
+        for i, data in enumerate(data_list):
+            features = extract_all_features(data, sfreq, channel_names)
+            results.append(features)
+            
+            if progress_callback:
+                progress_callback(i + 1, total)
+    else:
+        # Parallel processing using concurrent.futures
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        def extract_single(args):
+            idx, data = args
+            return idx, extract_all_features(data, sfreq, channel_names)
+        
+        with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+            futures = {
+                executor.submit(extract_single, (i, d)): i 
+                for i, d in enumerate(data_list)
+            }
+            
+            completed = 0
+            indexed_results = []
+            
+            for future in as_completed(futures):
+                idx, features = future.result()
+                indexed_results.append((idx, features))
+                completed += 1
+                
+                if progress_callback:
+                    progress_callback(completed, total)
+        
+        # Sort by original index
+        indexed_results.sort(key=lambda x: x[0])
+        results = [r[1] for r in indexed_results]
+    
+    return results
 
 
 def get_feature_names() -> List[str]:
@@ -354,3 +516,118 @@ def get_feature_names() -> List[str]:
             feature_names.append(f'{region}_{band}')
     
     return feature_names
+
+
+# =============================================================================
+# Memory-Efficient Utilities
+# =============================================================================
+
+def compute_features_streaming(
+    file_path: str,
+    window_sec: float = 2.0,
+    overlap: float = 0.5,
+    max_epochs: int = 50,
+    on_epoch: Optional[callable] = None
+) -> List[Dict[str, float]]:
+    """
+    Extract features from an EEG file using streaming approach.
+    
+    Memory efficient - loads data in chunks rather than all at once.
+    
+    Args:
+        file_path: Path to EEG file
+        window_sec: Window length in seconds
+        overlap: Overlap fraction
+        max_epochs: Maximum epochs
+        on_epoch: Optional callback for each epoch
+    
+    Returns:
+        List of feature dictionaries
+    """
+    try:
+        import mne
+    except ImportError:
+        raise ImportError("MNE is required for streaming feature extraction")
+    
+    # Load raw without preloading all data
+    raw = mne.io.read_raw_eeglab(file_path, preload=False, verbose=False)
+    sfreq = raw.info['sfreq']
+    duration = raw.times[-1]
+    
+    window_samples = int(window_sec * sfreq)
+    step_sec = window_sec * (1 - overlap)
+    
+    epoch_features = []
+    current_time = 0.0
+    
+    while current_time + window_sec <= duration and len(epoch_features) < max_epochs:
+        # Load only the needed segment
+        start_sample = int(current_time * sfreq)
+        end_sample = start_sample + window_samples
+        
+        # Get data for this segment only
+        data, times = raw[:, start_sample:end_sample]
+        data = data * 1e6  # Convert to µV
+        
+        # Average across channels
+        avg_signal = np.mean(data, axis=0)
+        
+        # Extract features
+        features = extract_all_features(avg_signal, sfreq)
+        features['epoch_start'] = current_time
+        features['epoch_end'] = current_time + window_sec
+        epoch_features.append(features)
+        
+        if on_epoch:
+            on_epoch(features, len(epoch_features))
+        
+        current_time += step_sec
+    
+    return epoch_features
+
+
+def get_feature_importance_order(
+    features: Dict[str, float],
+    feature_names: List[str] = None
+) -> List[Tuple[str, float]]:
+    """
+    Get features sorted by absolute value (importance proxy).
+    
+    Useful for understanding which features have largest magnitude.
+    """
+    if feature_names is None:
+        feature_names = list(features.keys())
+    
+    feature_values = [(name, abs(features.get(name, 0))) for name in feature_names]
+    feature_values.sort(key=lambda x: x[1], reverse=True)
+    
+    return feature_values
+
+
+def subsample_features(
+    features: Dict[str, float],
+    n_features: int = 50,
+    method: str = 'importance'
+) -> Dict[str, float]:
+    """
+    Reduce number of features for faster processing.
+    
+    Args:
+        features: Full feature dictionary
+        n_features: Target number of features
+        method: 'importance' (by magnitude) or 'random'
+    
+    Returns:
+        Subsampled feature dictionary
+    """
+    if len(features) <= n_features:
+        return features
+    
+    if method == 'importance':
+        sorted_features = get_feature_importance_order(features)
+        selected = [f[0] for f in sorted_features[:n_features]]
+    else:  # random
+        import random
+        selected = random.sample(list(features.keys()), n_features)
+    
+    return {k: features[k] for k in selected}

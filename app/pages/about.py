@@ -1,5 +1,5 @@
 """
-About page with project information and methodology.
+About page with project information, methodology, and system health.
 """
 import streamlit as st
 
@@ -9,6 +9,21 @@ def render_about():
     st.markdown("## ℹ️ About This Project")
     st.markdown("---")
     
+    # Tabs for different sections
+    main_tab1, main_tab2, main_tab3 = st.tabs(["📖 Project Info", "🏥 System Health", "🔒 Privacy"])
+    
+    with main_tab1:
+        render_project_info()
+    
+    with main_tab2:
+        render_system_health()
+    
+    with main_tab3:
+        render_privacy_info()
+
+
+def render_project_info():
+    """Render the project information section."""
     # Project overview
     st.markdown("""
     ### 🧠 EEG-Based Alzheimer's Disease Classification
@@ -273,19 +288,121 @@ def render_about():
        Frontiers in Neuroscience, 7, 267.
     """)
     
+    # Version info
+    render_version_info()
+
+
+def render_system_health():
+    """Render system health information."""
+    try:
+        from app.core.deployment import render_health_check, get_version_info
+        
+        # Version info at top
+        info = get_version_info()
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Version", info.version)
+        with col2:
+            st.metric("Python", info.python_version)
+        with col3:
+            st.metric("Streamlit", info.streamlit_version)
+        with col4:
+            st.metric("Build", info.build_date)
+        
+        st.markdown("---")
+        
+        # Full health check
+        render_health_check()
+        
+    except ImportError:
+        st.info("System health monitoring requires additional dependencies.")
+        
+        # Basic info fallback
+        import sys
+        
+        st.markdown("### Basic System Info")
+        st.write(f"**Python Version:** {sys.version}")
+        st.write(f"**Streamlit Version:** {st.__version__}")
+
+
+def render_privacy_info():
+    """Render privacy and consent information."""
+    st.markdown("### 🔒 Privacy & Data Handling")
+    
+    st.markdown("""
+    This application is designed with privacy in mind:
+    
+    #### Data Processing
+    - **No permanent storage**: Uploaded EEG files are processed temporarily
+    - **Session-based**: All analysis results are stored in your browser session only
+    - **No tracking**: We do not use cookies or tracking mechanisms
+    
+    #### Your Rights
+    - **Access**: View all data stored in your session
+    - **Deletion**: Clear all session data at any time
+    - **Export**: Download your analysis results
+    
+    #### Security Measures
+    - Session timeout after 30 minutes of inactivity
+    - Secure file handling with validation
+    - Rate limiting to prevent abuse
+    """)
+    
+    try:
+        from app.core.security import render_privacy_controls
+        
+        st.markdown("---")
+        render_privacy_controls()
+        
+    except ImportError:
+        st.info("Privacy controls require additional dependencies.")
+    
+    st.markdown("---")
+    st.markdown("### Contact for Privacy Concerns")
+    st.markdown("""
+    If you have any privacy concerns or questions about data handling, 
+    please open an issue on the project repository.
+    """)
+
+
+def render_version_info():
+    """Render version information."""
     st.markdown("---")
     
-    # Version info
-    col1, col2, col3 = st.columns(3)
+    try:
+        from app.core.deployment import get_version_info, detect_environment
+        
+        info = get_version_info()
+        env = detect_environment()
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.markdown(f"**Version:** {info.version}")
+        
+        with col2:
+            st.markdown(f"**Build Date:** {info.build_date}")
+        
+        with col3:
+            st.markdown(f"**Environment:** {env.environment}")
+        
+        with col4:
+            st.markdown("**License:** MIT")
     
-    with col1:
-        st.markdown("**Version:** 1.0.0")
-    
-    with col2:
-        st.markdown("**Last Updated:** January 2025")
-    
-    with col3:
-        st.markdown("**License:** MIT")
+    except ImportError:
+        # Fallback
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("**Version:** 1.2.0")
+        
+        with col2:
+            st.markdown("**Last Updated:** January 2025")
+        
+        with col3:
+            st.markdown("**License:** MIT")
     
     # Contact
     st.markdown("---")

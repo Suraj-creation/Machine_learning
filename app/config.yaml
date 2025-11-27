@@ -1,5 +1,7 @@
 # EEG Alzheimer Classification App Configuration
+# All application settings centralized in this file
 
+# ==================== PATHS ====================
 paths:
   data_root: "data/ds004504"
   models_root: "models"
@@ -8,16 +10,19 @@ paths:
   participants_file: "data/ds004504/participants.tsv"
   derivatives_dir: "data/ds004504/derivatives"
 
+# ==================== MODEL FILES ====================
 model_files:
   lightgbm: "best_lightgbm_model.joblib"
   scaler: "feature_scaler.joblib"
   label_encoder: "label_encoder.joblib"
 
+# ==================== OUTPUT FILES ====================
 output_files:
   improvement_results: "all_improvement_results.csv"
   baseline_results: "real_eeg_baseline_results.csv"
   epoch_features_sample: "epoch_features_sample.csv"
 
+# ==================== EEG CONFIGURATION ====================
 eeg:
   sampling_rate: 500
   n_channels: 19
@@ -54,11 +59,14 @@ eeg:
     occipital: [O1, O2]
     central: [C3, Cz, C4]
 
+# ==================== EPOCH CONFIGURATION ====================
 epoch:
   window_seconds: 2
   overlap_fraction: 0.5
   max_epochs_per_subject: 50
+  min_samples: 100
 
+# ==================== CLASSES ====================
 classes:
   labels: ["AD", "CN", "FTD"]
   mapping:
@@ -69,18 +77,41 @@ classes:
     AD: "#FF6B6B"
     CN: "#51CF66"
     FTD: "#339AF0"
+  icons:
+    AD: "🔴"
+    CN: "🟢"
+    FTD: "🔵"
 
+# ==================== UI CONFIGURATION ====================
 ui:
   colors:
     primary: "#1E3A8A"
     secondary: "#60A5FA"
     background: "#F9FAFB"
     success: "#51CF66"
-    warning: "#FF6B6B"
+    warning: "#FFA94D"
+    error: "#FF6B6B"
     info: "#339AF0"
+    text_primary: "#1F2937"
+    text_secondary: "#6B7280"
+    border: "#E5E7EB"
   max_upload_mb: 200
-  allowed_extensions: [".set", ".fdt", ".edf"]
+  allowed_extensions: [".set", ".fdt", ".edf", ".fif", ".bdf"]
+  file_magic_bytes:
+    set: null  # EEGLAB format varies
+    edf: "0       "  # EDF header starts with "0"
+    bdf: "\xff\x42\x49\x4f\x53\x45\x4d\x49"  # BDF header
+  theme:
+    default: "light"
+    available: ["light", "dark"]
+  animation:
+    enabled: true
+    duration_ms: 300
+  pagination:
+    default_page_size: 20
+    max_page_size: 100
 
+# ==================== PERFORMANCE METRICS ====================
 performance:
   metrics:
     three_class_accuracy: 0.482
@@ -91,8 +122,133 @@ performance:
     AD: 0.608
     CN: 0.514
     FTD: 0.269
+  auc:
+    AD: 0.72
+    CN: 0.68
+    FTD: 0.64
 
+# ==================== CONFIDENCE THRESHOLDS ====================
 confidence_thresholds:
   high: 0.7
   medium: 0.5
   low: 0.0
+
+# ==================== FEATURE EXTRACTION ====================
+features:
+  total_count: 438
+  families:
+    core_psd: 95
+    enhanced_psd: 133
+    peak_frequency: 38
+    non_linear: 76
+    connectivity: 96
+  clinical_ratios:
+    - theta_alpha_ratio
+    - delta_alpha_ratio
+    - theta_beta_ratio
+    - slowing_ratio
+  entropy_measures:
+    - spectral_entropy
+    - permutation_entropy
+  psd_params:
+    nperseg: 1024
+    noverlap_fraction: 0.5
+
+# ==================== VALIDATION ====================
+validation:
+  max_file_size_mb: 200
+  min_duration_sec: 10
+  max_duration_sec: 3600
+  required_channels: 10
+  expected_sfreq: 500
+  sfreq_tolerance: 0.01
+  rate_limit:
+    uploads_per_minute: 10
+    cooldown_seconds: 3
+
+# ==================== SECURITY ====================
+security:
+  sanitize_inputs: true
+  hash_algorithm: "sha256"
+  session_timeout_minutes: 60
+  max_concurrent_sessions: 100
+  gdpr:
+    enabled: true
+    consent_required: true
+    data_retention_days: 30
+
+# ==================== LOGGING ====================
+logging:
+  level: "INFO"
+  format: "json"
+  file: "logs/app.log"
+  max_size_mb: 10
+  backup_count: 5
+  include_timestamps: true
+
+# ==================== CACHING ====================
+caching:
+  ttl_seconds: 3600
+  max_entries: 1000
+  psd_cache_enabled: true
+  model_cache_enabled: true
+
+# ==================== BATCH PROCESSING ====================
+batch:
+  max_files: 20
+  parallel_workers: 4
+  timeout_per_file_sec: 60
+  retry_attempts: 2
+
+# ==================== API CONFIGURATION ====================
+api:
+  enabled: false
+  version: "v1"
+  rate_limit: 100
+  cors_origins: ["*"]
+
+# ==================== MODEL HYPERPARAMETERS ====================
+model_params:
+  lightgbm:
+    n_estimators: 200
+    max_depth: 6
+    learning_rate: 0.05
+    num_leaves: 31
+    min_child_samples: 20
+    subsample: 0.8
+    colsample_bytree: 0.8
+    reg_alpha: 0.1
+    reg_lambda: 0.1
+    random_state: 42
+
+# ==================== APP INFO ====================
+app:
+  name: "EEG Alzheimer Classification"
+  version: "1.1.0"
+  description: "Machine learning pipeline for classifying Alzheimer's Disease using EEG signals"
+  author: "ML Research Team"
+  license: "MIT"
+  repository: "https://github.com/Suraj-creation/Machine_learning"
+  dataset:
+    name: "OpenNeuro ds004504"
+    url: "https://openneuro.org/datasets/ds004504"
+    citation: "Miltiadous, A., et al. (2023). A dataset of EEG recordings from Alzheimer's disease, Frontotemporal dementia and Healthy subjects. OpenNeuro."
+
+# ==================== CHANGELOG ====================
+changelog:
+  - version: "1.1.0"
+    date: "2025-11-27"
+    changes:
+      - "Added type hints and dataclasses"
+      - "Implemented dependency injection"
+      - "Enhanced UI with dark mode support"
+      - "Added SHAP visualizations"
+      - "Improved performance with caching"
+      - "Added comprehensive validation"
+  - version: "1.0.0"
+    date: "2025-01-01"
+    changes:
+      - "Initial release"
+      - "438-feature extraction pipeline"
+      - "LightGBM classification model"
+      - "Streamlit web interface"

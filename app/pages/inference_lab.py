@@ -327,7 +327,7 @@ def render_inference_lab():
         st.markdown("---")
         st.markdown("#### 📥 Export Results")
         
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             # CSV export of features
@@ -335,13 +335,49 @@ def render_inference_lab():
             features_df = pd.DataFrame([features])
             features_csv = features_df.to_csv(index=False)
             st.download_button(
-                "📥 Download Features (CSV)",
+                "📥 Features (CSV)",
                 data=features_csv,
                 file_name=f"{uploaded_file.name.split('.')[0]}_features.csv",
                 mime="text/csv"
             )
         
         with col2:
+            # HTML report
+            try:
+                from app.services.report_generator import generate_html_report
+                
+                clinical_markers = {
+                    "Theta/Alpha Ratio": {
+                        "value": features.get('theta_alpha_ratio', 0),
+                        "status": "alert" if features.get('theta_alpha_ratio', 0) > 1.5 else "normal",
+                        "interpretation": "Elevated" if features.get('theta_alpha_ratio', 0) > 1.5 else "Normal"
+                    },
+                    "Peak Alpha Frequency": {
+                        "value": features.get('peak_alpha_frequency', 10),
+                        "status": "alert" if features.get('peak_alpha_frequency', 10) < 9 else "normal",
+                        "interpretation": "Slowed" if features.get('peak_alpha_frequency', 10) < 9 else "Normal"
+                    }
+                }
+                
+                html_report = generate_html_report(
+                    subject_id=uploaded_file.name.split('.')[0],
+                    diagnosis=predicted_class,
+                    confidence=max(probabilities),
+                    features=features,
+                    clinical_markers=clinical_markers,
+                    include_recommendations=True
+                )
+                
+                st.download_button(
+                    "📄 Report (HTML)",
+                    data=html_report,
+                    file_name=f"{uploaded_file.name.split('.')[0]}_report.html",
+                    mime="text/html"
+                )
+            except ImportError:
+                pass
+        
+        with col3:
             # Markdown report
             from app.services.reporting import generate_prediction_report_md
             
@@ -355,13 +391,13 @@ def render_inference_lab():
             )
             
             st.download_button(
-                "📄 Download Report (Markdown)",
+                "📋 Report (Markdown)",
                 data=report_md,
                 file_name=f"{uploaded_file.name.split('.')[0]}_report.md",
                 mime="text/markdown"
             )
         
-        with col3:
+        with col4:
             # JSON log
             import json
             from datetime import datetime
@@ -380,7 +416,7 @@ def render_inference_lab():
             }
             
             st.download_button(
-                "📋 Download Log (JSON)",
+                "📋 Log (JSON)",
                 data=json.dumps(prediction_log, indent=2),
                 file_name=f"{uploaded_file.name.split('.')[0]}_log.json",
                 mime="application/json"
