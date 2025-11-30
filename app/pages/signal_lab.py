@@ -3,6 +3,10 @@ Signal Lab page for EEG signal visualization and analysis.
 """
 import streamlit as st
 import numpy as np
+import pandas as pd
+import io
+import json
+from datetime import datetime
 
 from app.core.config import CONFIG, get_class_color
 from app.services.data_access import load_participants, get_subject_eeg_path, load_raw_eeg
@@ -14,6 +18,13 @@ from app.services.visualization import (
     plot_radar_chart,
     plot_topomap
 )
+
+# Try to import PDF generator for reports
+try:
+    from app.services.pdf_generator import generate_pdf_report
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
 
 
 def render_signal_lab():
@@ -160,12 +171,13 @@ def render_signal_lab():
     st.markdown("---")
     
     # Tabbed analysis sections
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📈 Raw EEG Traces",
         "📊 Power Spectrum",
         "🗺️ Topographic Map",
         "🎨 Spectral Bands",
-        "🎯 Feature Summary"
+        "🎯 Feature Summary",
+        "📥 Export Center"
     ])
     
     with tab1:
@@ -485,3 +497,559 @@ def render_signal_lab():
                 )
         else:
             st.warning("Please select at least one channel.")
+    
+    with tab6:
+        render_signal_export_center(
+            selected_subject, 
+            data, 
+            fs, 
+            selected_channels,
+            df[df['Subject_ID'] == selected_subject].iloc[0] if selected_subject else None
+        )
+
+
+def render_signal_export_center(subject_id: str, data: dict, fs: float, selected_channels: list, subject_info):
+    """Render export options for Signal Lab."""
+    st.markdown("#### 📥 Export Center")
+    st.info("💡 Export your signal analysis data in multiple formats for further research or documentation.")
+    
+    # Quick Stats
+    st.markdown("##### 📊 Data Overview")
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Subject", subject_id)
+    with col2:
+        st.metric("Channels", len(data))
+    with col3:
+        st.metric("Sample Rate", f"{fs:.0f} Hz")
+    with col4:
+        duration = len(list(data.values())[0]) / fs if data else 0
+        st.metric("Duration", f"{duration:.1f}s")
+    
+    st.markdown("---")
+    
+    # Export Sections
+    st.markdown("##### 📋 Signal Data Exports")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("**Raw EEG Data**")
+        st.caption("Export raw signal values")
+        
+        # Prepare EEG data export
+        if data and selected_channels:
+            eeg_df = pd.DataFrame({ch: data[ch] for ch in selected_channels if ch in data})
+            eeg_df.insert(0, 'Time_s', np.arange(len(eeg_df)) / fs)
+            
+            csv_data = eeg_df.to_csv(index=False)
+            st.download_button(
+                "📄 Download EEG (CSV)",
+                data=csv_data,
+                file_name=f"{subject_id}_eeg_signals.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        else:
+            st.button("📄 No Data Available", disabled=True, use_container_width=True)
+    
+    with col2:
+        st.markdown("**PSD Data**")
+        st.caption("Power spectral density values")
+        
+        if data and selected_channels:
+            # Compute PSD for export
+            psd_export = {'Frequency_Hz': None}
+            for ch in selected_channels:
+                if ch in data:
+                    f, psd = compute_psd(data[ch], fs)
+                    if psd_export['Frequency_Hz'] is None:
+                        psd_export['Frequency_Hz'] = f
+                    psd_export[f'{ch}_power'] = psd
+            
+            psd_df = pd.DataFrame(psd_export)
+            csv_psd = psd_df.to_csv(index=False)
+            
+            st.download_button(
+                "📊 Download PSD (CSV)",
+                data=csv_psd,
+                file_name=f"{subject_id}_psd_data.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        else:
+            st.button("📊 No Data Available", disabled=True, use_container_width=True)
+    
+    with col3:
+        st.markdown("**Band Powers**")
+        st.caption("Frequency band power values")
+        
+        if data and selected_channels:
+            bands = CONFIG.get('frequency_bands', {
+                'delta': [0.5, 4],
+                'theta': [4, 8],
+                'alpha': [8, 13],
+                'beta': [13, 30],
+                'gamma': [30, 50]
+            })
+            
+            band_data = []
+            for ch in selected_channels:
+                if ch in data:
+                    f, psd = compute_psd(data[ch], fs)
+                    row = {'Channel': ch}
+                    for band_name, (low, high) in bands.items():
+                        power = compute_band_power(psd, f, low, high)
+                        row[f'{band_name.capitalize()}_power'] = power
+                    band_data.append(row)
+            
+            band_df = pd.DataFrame(band_data)
+            csv_bands = band_df.to_csv(index=False)
+            
+            st.download_button(
+                "📈 Download Band Powers",
+                data=csv_bands,
+                file_name=f"{subject_id}_band_powers.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        else:
+            st.button("📈 No Data Available", disabled=True, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Feature Exports
+    st.markdown("##### 🎯 Feature Exports")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Extracted Features**")
+        st.caption("All computed EEG features")
+        
+        if data and selected_channels:
+            avg_signal = np.mean([data[ch] for ch in selected_channels if ch in data], axis=0)
+            features = extract_all_features(avg_signal, fs)
+            features['subject_id'] = subject_id
+            features['group'] = subject_info['Group'] if subject_info is not None else 'Unknown'
+            
+            features_df = pd.DataFrame([features])
+            csv_features = features_df.to_csv(index=False)
+            
+            st.download_button(
+                "🎯 Download Features (CSV)",
+                data=csv_features,
+                file_name=f"{subject_id}_all_features.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+            
+            # Also offer JSON format
+            json_features = json.dumps(features, indent=2, default=str)
+            st.download_button(
+                "🔗 Download Features (JSON)",
+                data=json_features,
+                file_name=f"{subject_id}_features.json",
+                mime="application/json",
+                use_container_width=True
+            )
+        else:
+            st.button("🎯 No Data Available", disabled=True, use_container_width=True)
+    
+    with col2:
+        st.markdown("**Analysis Report**")
+        st.caption("Comprehensive analysis summary")
+        
+        if data and selected_channels and subject_info is not None:
+            # Generate markdown report
+            report = generate_signal_lab_report(subject_id, data, fs, selected_channels, subject_info)
+            
+            st.download_button(
+                "📝 Download Report (Markdown)",
+                data=report,
+                file_name=f"{subject_id}_signal_analysis.md",
+                mime="text/markdown",
+                use_container_width=True
+            )
+            
+            # HTML report
+            html_report = generate_signal_html_report(subject_id, data, fs, selected_channels, subject_info)
+            st.download_button(
+                "🌐 Download Report (HTML)",
+                data=html_report,
+                file_name=f"{subject_id}_signal_analysis.html",
+                mime="text/html",
+                use_container_width=True
+            )
+        else:
+            st.button("📝 No Data Available", disabled=True, use_container_width=True)
+    
+    st.markdown("---")
+    
+    # Visualization Exports
+    st.markdown("##### 🎨 Visualization Exports")
+    st.caption("Export visualizations in various formats")
+    
+    if data and selected_channels:
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("📸 EEG Trace (PNG)", use_container_width=True):
+                channel_data = {ch: data[ch][:int(10*fs)] for ch in selected_channels if ch in data}
+                fig = plot_raw_eeg(channel_data, fs, selected_channels)
+                
+                # Export as PNG using plotly
+                img_bytes = fig.to_image(format="png", width=1200, height=800)
+                st.download_button(
+                    "Download EEG PNG",
+                    data=img_bytes,
+                    file_name=f"{subject_id}_eeg_traces.png",
+                    mime="image/png"
+                )
+        
+        with col2:
+            if st.button("📸 PSD Plot (PNG)", use_container_width=True):
+                psd_data = {}
+                freqs = None
+                for ch in selected_channels:
+                    if ch in data:
+                        f, psd = compute_psd(data[ch], fs)
+                        if freqs is None:
+                            freqs = np.array(f)
+                        psd_data[ch] = np.array(psd)
+                
+                if freqs is not None:
+                    freq_mask = freqs <= 50
+                    freqs = freqs[freq_mask]
+                    psd_data = {ch: psd[freq_mask] for ch, psd in psd_data.items()}
+                    
+                    fig = plot_psd(psd_data, freqs, selected_channels)
+                    img_bytes = fig.to_image(format="png", width=1200, height=600)
+                    st.download_button(
+                        "Download PSD PNG",
+                        data=img_bytes,
+                        file_name=f"{subject_id}_psd.png",
+                        mime="image/png"
+                    )
+        
+        with col3:
+            if st.button("📸 Spectral Bands (PNG)", use_container_width=True):
+                channel_data = {ch: data[ch] for ch in selected_channels if ch in data}
+                fig = plot_spectral_bands(channel_data, fs)
+                
+                img_bytes = fig.to_image(format="png", width=1200, height=600)
+                st.download_button(
+                    "Download Bands PNG",
+                    data=img_bytes,
+                    file_name=f"{subject_id}_spectral_bands.png",
+                    mime="image/png"
+                )
+    else:
+        st.warning("Select channels to enable visualization exports.")
+
+
+def generate_signal_lab_report(subject_id: str, data: dict, fs: float, channels: list, subject_info) -> str:
+    """Generate a comprehensive markdown report for Signal Lab analysis."""
+    
+    # Calculate features
+    avg_signal = np.mean([data[ch] for ch in channels if ch in data], axis=0)
+    features = extract_all_features(avg_signal, fs)
+    
+    # Calculate band powers
+    bands = CONFIG.get('frequency_bands', {
+        'delta': [0.5, 4], 'theta': [4, 8], 'alpha': [8, 13], 'beta': [13, 30], 'gamma': [30, 50]
+    })
+    
+    f, psd = compute_psd(avg_signal, fs)
+    band_powers = {}
+    for band_name, (low, high) in bands.items():
+        band_powers[band_name] = compute_band_power(psd, f, low, high)
+    
+    report = f"""# EEG Signal Analysis Report
+
+**Subject ID:** {subject_id}  
+**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+---
+
+## Subject Information
+
+| Attribute | Value |
+|-----------|-------|
+| Subject ID | {subject_id} |
+| Group | {subject_info.get('Group', 'N/A')} |
+| Age | {subject_info.get('Age', 'N/A')} |
+| Gender | {subject_info.get('Gender', 'N/A')} |
+| MMSE Score | {subject_info.get('MMSE', 'N/A')} |
+
+---
+
+## Recording Parameters
+
+| Parameter | Value |
+|-----------|-------|
+| Sample Rate | {fs:.0f} Hz |
+| Duration | {len(avg_signal)/fs:.2f} seconds |
+| Channels Analyzed | {', '.join(channels)} |
+| Total Channels | {len(channels)} |
+
+---
+
+## Frequency Band Powers
+
+| Band | Frequency Range | Power (µV²/Hz) |
+|------|-----------------|----------------|
+| Delta | 0.5-4 Hz | {band_powers.get('delta', 0):.4f} |
+| Theta | 4-8 Hz | {band_powers.get('theta', 0):.4f} |
+| Alpha | 8-13 Hz | {band_powers.get('alpha', 0):.4f} |
+| Beta | 13-30 Hz | {band_powers.get('beta', 0):.4f} |
+| Gamma | 30-50 Hz | {band_powers.get('gamma', 0):.4f} |
+
+---
+
+## Clinical Markers
+
+| Marker | Value | Status |
+|--------|-------|--------|
+| Theta/Alpha Ratio | {features.get('theta_alpha_ratio', 0):.3f} | {'⚠️ Elevated' if features.get('theta_alpha_ratio', 0) > 1.5 else '✓ Normal'} |
+| Delta/Alpha Ratio | {features.get('delta_alpha_ratio', 0):.3f} | {'⚠️ Elevated' if features.get('delta_alpha_ratio', 0) > 1.5 else '✓ Normal'} |
+| Peak Alpha Frequency | {features.get('peak_alpha_frequency', 0):.2f} Hz | {'⚠️ Slowed' if features.get('peak_alpha_frequency', 0) < 9 else '✓ Normal'} |
+| Spectral Entropy | {features.get('spectral_entropy', 0):.3f} | {'⚠️ Reduced' if features.get('spectral_entropy', 0) < 0.5 else '✓ Normal'} |
+
+---
+
+## Non-Linear Features
+
+| Feature | Value |
+|---------|-------|
+| Permutation Entropy | {features.get('permutation_entropy', 0):.4f} |
+| Spectral Entropy | {features.get('spectral_entropy', 0):.4f} |
+| Hjorth Activity | {features.get('hjorth_activity', 0):.4f} |
+| Hjorth Mobility | {features.get('hjorth_mobility', 0):.4f} |
+| Hjorth Complexity | {features.get('hjorth_complexity', 0):.4f} |
+
+---
+
+## Disclaimer
+
+This analysis is generated automatically for research purposes only. Results should not be used for clinical diagnosis without validation by qualified medical professionals.
+
+---
+
+*Generated by EEG Dementia Analysis Platform*
+"""
+    return report
+
+
+def generate_signal_html_report(subject_id: str, data: dict, fs: float, channels: list, subject_info) -> str:
+    """Generate an HTML report for Signal Lab analysis."""
+    
+    # Calculate features
+    avg_signal = np.mean([data[ch] for ch in channels if ch in data], axis=0)
+    features = extract_all_features(avg_signal, fs)
+    
+    # Calculate band powers
+    bands = CONFIG.get('frequency_bands', {
+        'delta': [0.5, 4], 'theta': [4, 8], 'alpha': [8, 13], 'beta': [13, 30], 'gamma': [30, 50]
+    })
+    
+    f, psd = compute_psd(avg_signal, fs)
+    band_powers = {}
+    for band_name, (low, high) in bands.items():
+        band_powers[band_name] = compute_band_power(psd, f, low, high)
+    
+    # Normalize band powers for visualization
+    total_power = sum(band_powers.values())
+    band_pct = {k: v/total_power*100 for k, v in band_powers.items()} if total_power > 0 else band_powers
+    
+    html = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Signal Analysis Report - {subject_id}</title>
+    <style>
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+            padding: 2rem;
+        }}
+        .container {{ max-width: 900px; margin: 0 auto; }}
+        .header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+            text-align: center;
+        }}
+        .header h1 {{ font-size: 1.75rem; margin-bottom: 0.5rem; }}
+        .header p {{ opacity: 0.9; font-size: 0.9rem; }}
+        .section {{
+            background: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 1.5rem;
+        }}
+        .section h2 {{
+            color: #333;
+            margin-bottom: 1rem;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 0.5rem;
+            font-size: 1.2rem;
+        }}
+        .metrics {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; }}
+        .metric {{
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+        }}
+        .metric h3 {{ font-size: 1.5rem; color: #667eea; margin-bottom: 0.25rem; }}
+        .metric p {{ color: #666; font-size: 0.85rem; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 1rem; }}
+        th, td {{ padding: 0.75rem; text-align: left; border-bottom: 1px solid #eee; }}
+        th {{ background: #f8f9fa; font-weight: 600; }}
+        .band-bar {{
+            display: flex;
+            height: 30px;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 1rem 0;
+        }}
+        .band-segment {{ display: flex; align-items: center; justify-content: center; color: white; font-size: 0.8rem; }}
+        .delta {{ background: #4ECDC4; }}
+        .theta {{ background: #45B7D1; }}
+        .alpha {{ background: #667eea; }}
+        .beta {{ background: #764ba2; }}
+        .gamma {{ background: #FF6B6B; }}
+        .status {{ padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.8rem; }}
+        .status-normal {{ background: #d4edda; color: #155724; }}
+        .status-warning {{ background: #fff3cd; color: #856404; }}
+        .footer {{
+            text-align: center;
+            color: #666;
+            font-size: 0.85rem;
+            margin-top: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid #ddd;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧠 EEG Signal Analysis Report</h1>
+            <p>Subject: {subject_id} | Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+        </div>
+        
+        <div class="section">
+            <h2>📋 Subject Information</h2>
+            <div class="metrics">
+                <div class="metric">
+                    <h3>{subject_info.get('Group', 'N/A')}</h3>
+                    <p>Diagnosis Group</p>
+                </div>
+                <div class="metric">
+                    <h3>{subject_info.get('Age', 'N/A')}</h3>
+                    <p>Age (years)</p>
+                </div>
+                <div class="metric">
+                    <h3>{subject_info.get('Gender', 'N/A')}</h3>
+                    <p>Gender</p>
+                </div>
+                <div class="metric">
+                    <h3>{subject_info.get('MMSE', 'N/A')}</h3>
+                    <p>MMSE Score</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>⚙️ Recording Parameters</h2>
+            <div class="metrics">
+                <div class="metric">
+                    <h3>{fs:.0f} Hz</h3>
+                    <p>Sample Rate</p>
+                </div>
+                <div class="metric">
+                    <h3>{len(avg_signal)/fs:.1f}s</h3>
+                    <p>Duration</p>
+                </div>
+                <div class="metric">
+                    <h3>{len(channels)}</h3>
+                    <p>Channels</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>📊 Frequency Band Distribution</h2>
+            <div class="band-bar">
+                <div class="band-segment delta" style="width: {band_pct.get('delta', 0):.1f}%;">δ {band_pct.get('delta', 0):.0f}%</div>
+                <div class="band-segment theta" style="width: {band_pct.get('theta', 0):.1f}%;">θ {band_pct.get('theta', 0):.0f}%</div>
+                <div class="band-segment alpha" style="width: {band_pct.get('alpha', 0):.1f}%;">α {band_pct.get('alpha', 0):.0f}%</div>
+                <div class="band-segment beta" style="width: {band_pct.get('beta', 0):.1f}%;">β {band_pct.get('beta', 0):.0f}%</div>
+                <div class="band-segment gamma" style="width: {band_pct.get('gamma', 0):.1f}%;">γ {band_pct.get('gamma', 0):.0f}%</div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Band</th>
+                        <th>Frequency</th>
+                        <th>Power (µV²/Hz)</th>
+                        <th>Relative %</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>Delta (δ)</td><td>0.5-4 Hz</td><td>{band_powers.get('delta', 0):.4f}</td><td>{band_pct.get('delta', 0):.1f}%</td></tr>
+                    <tr><td>Theta (θ)</td><td>4-8 Hz</td><td>{band_powers.get('theta', 0):.4f}</td><td>{band_pct.get('theta', 0):.1f}%</td></tr>
+                    <tr><td>Alpha (α)</td><td>8-13 Hz</td><td>{band_powers.get('alpha', 0):.4f}</td><td>{band_pct.get('alpha', 0):.1f}%</td></tr>
+                    <tr><td>Beta (β)</td><td>13-30 Hz</td><td>{band_powers.get('beta', 0):.4f}</td><td>{band_pct.get('beta', 0):.1f}%</td></tr>
+                    <tr><td>Gamma (γ)</td><td>30-50 Hz</td><td>{band_powers.get('gamma', 0):.4f}</td><td>{band_pct.get('gamma', 0):.1f}%</td></tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="section">
+            <h2>🔬 Clinical Markers</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Marker</th>
+                        <th>Value</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Theta/Alpha Ratio</td>
+                        <td>{features.get('theta_alpha_ratio', 0):.3f}</td>
+                        <td><span class="status {'status-warning' if features.get('theta_alpha_ratio', 0) > 1.5 else 'status-normal'}">{'⚠️ Elevated' if features.get('theta_alpha_ratio', 0) > 1.5 else '✓ Normal'}</span></td>
+                    </tr>
+                    <tr>
+                        <td>Peak Alpha Frequency</td>
+                        <td>{features.get('peak_alpha_frequency', 0):.2f} Hz</td>
+                        <td><span class="status {'status-warning' if features.get('peak_alpha_frequency', 0) < 9 else 'status-normal'}">{'⚠️ Slowed' if features.get('peak_alpha_frequency', 0) < 9 else '✓ Normal'}</span></td>
+                    </tr>
+                    <tr>
+                        <td>Spectral Entropy</td>
+                        <td>{features.get('spectral_entropy', 0):.3f}</td>
+                        <td><span class="status {'status-warning' if features.get('spectral_entropy', 0) < 0.5 else 'status-normal'}">{'⚠️ Reduced' if features.get('spectral_entropy', 0) < 0.5 else '✓ Normal'}</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="footer">
+            <p>⚠️ This analysis is for research purposes only and should not be used for clinical diagnosis.</p>
+            <p>Generated by EEG Dementia Analysis Platform</p>
+        </div>
+    </div>
+</body>
+</html>
+    """
+    return html

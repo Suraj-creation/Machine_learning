@@ -337,6 +337,7 @@ def render_inference_lab():
         st.markdown("---")
         st.markdown("#### 📥 Export Results")
         
+        # Row 1: Main exports
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
@@ -345,10 +346,11 @@ def render_inference_lab():
             features_df = pd.DataFrame([features])
             features_csv = features_df.to_csv(index=False)
             st.download_button(
-                "📥 Features (CSV)",
+                "📊 Features (CSV)",
                 data=features_csv,
                 file_name=f"{uploaded_file.name.split('.')[0]}_features.csv",
-                mime="text/csv"
+                mime="text/csv",
+                use_container_width=True
             )
         
         with col2:
@@ -382,12 +384,45 @@ def render_inference_lab():
                     "📄 Report (HTML)",
                     data=html_report,
                     file_name=f"{uploaded_file.name.split('.')[0]}_report.html",
-                    mime="text/html"
+                    mime="text/html",
+                    use_container_width=True
                 )
             except ImportError:
-                pass
+                st.button("📄 HTML (N/A)", disabled=True, use_container_width=True)
         
         with col3:
+            # PDF report
+            try:
+                from app.services.pdf_generator import generate_pdf_report
+                
+                clinical_markers = {
+                    "Theta/Alpha Ratio": features.get('theta_alpha_ratio', 0),
+                    "Peak Alpha Frequency": features.get('peak_alpha_frequency', 10),
+                    "Spectral Entropy": features.get('spectral_entropy_mean', 0)
+                }
+                
+                pdf_bytes = generate_pdf_report(
+                    subject_id=uploaded_file.name.split('.')[0],
+                    diagnosis=predicted_class,
+                    confidence=max(probabilities),
+                    probabilities={label: prob for label, prob in zip(class_labels, probabilities)},
+                    features=features,
+                    clinical_markers=clinical_markers,
+                    top_features=dict(top_features[:10]) if top_features else {},
+                    include_disclaimer=True
+                )
+                
+                st.download_button(
+                    "📑 Report (PDF)",
+                    data=pdf_bytes,
+                    file_name=f"{uploaded_file.name.split('.')[0]}_report.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            except Exception as e:
+                st.button("📑 PDF (N/A)", disabled=True, use_container_width=True)
+        
+        with col4:
             # Markdown report
             from app.services.reporting import generate_prediction_report_md
             
@@ -401,13 +436,51 @@ def render_inference_lab():
             )
             
             st.download_button(
-                "📋 Report (Markdown)",
+                "📋 Report (MD)",
                 data=report_md,
                 file_name=f"{uploaded_file.name.split('.')[0]}_report.md",
-                mime="text/markdown"
+                mime="text/markdown",
+                use_container_width=True
             )
         
-        with col4:
+        # Row 2: Additional exports
+        st.markdown("##### Additional Exports")
+        col5, col6, col7, col8 = st.columns(4)
+        
+        with col5:
+            # Excel export
+            try:
+                import io
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    features_df.to_excel(writer, index=False, sheet_name='Features')
+                    
+                    # Add summary sheet
+                    summary_df = pd.DataFrame({
+                        'Metric': ['Prediction', 'Confidence', 'File'],
+                        'Value': [predicted_class, f"{max(probabilities)*100:.1f}%", uploaded_file.name]
+                    })
+                    summary_df.to_excel(writer, index=False, sheet_name='Summary')
+                    
+                    # Add probabilities
+                    prob_df = pd.DataFrame({
+                        'Class': class_labels,
+                        'Probability': probabilities
+                    })
+                    prob_df.to_excel(writer, index=False, sheet_name='Probabilities')
+                
+                excel_data = buffer.getvalue()
+                st.download_button(
+                    "📊 Full Report (Excel)",
+                    data=excel_data,
+                    file_name=f"{uploaded_file.name.split('.')[0]}_analysis.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+            except Exception:
+                st.button("📊 Excel (N/A)", disabled=True, use_container_width=True)
+        
+        with col6:
             # JSON log
             import json
             from datetime import datetime
@@ -426,11 +499,59 @@ def render_inference_lab():
             }
             
             st.download_button(
-                "📋 Log (JSON)",
+                "🔧 Log (JSON)",
                 data=json.dumps(prediction_log, indent=2),
                 file_name=f"{uploaded_file.name.split('.')[0]}_log.json",
-                mime="application/json"
+                mime="application/json",
+                use_container_width=True
             )
+        
+        with col7:
+            # Session log with history
+            try:
+                from app.services.export_utils import create_session_log
+                
+                session_log = create_session_log(
+                    predictions=[{
+                        'filename': uploaded_file.name,
+                        'prediction': predicted_class,
+                        'confidence': max(probabilities),
+                        'probabilities': prob_dict,
+                        'features': features
+                    }]
+                )
+                
+                st.download_button(
+                    "📝 Session Log",
+                    data=session_log,
+                    file_name="session_log.md",
+                    mime="text/markdown",
+                    use_container_width=True
+                )
+            except Exception:
+                st.button("📝 Session (N/A)", disabled=True, use_container_width=True)
+        
+        with col8:
+            # Feature importance visualization export
+            try:
+                if top_features:
+                    import plotly.io as pio
+                    from app.services.visualization import plot_feature_importance
+                    
+                    importance_df = pd.DataFrame(top_features[:15], columns=['Feature', 'Importance'])
+                    fig = plot_feature_importance(importance_df)
+                    
+                    # Export as HTML
+                    html_fig = pio.to_html(fig, full_html=True)
+                    st.download_button(
+                        "📈 Charts (HTML)",
+                        data=html_fig,
+                        file_name=f"{uploaded_file.name.split('.')[0]}_charts.html",
+                        mime="text/html",
+                        use_container_width=True
+                    )
+            except Exception:
+                st.button("📈 Charts (N/A)", disabled=True, use_container_width=True)
         
         # Clinical disclaimer
         st.markdown("---")

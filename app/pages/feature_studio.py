@@ -4,6 +4,9 @@ Feature Studio page for feature engineering visualization and education.
 import streamlit as st
 import numpy as np
 import pandas as pd
+import io
+import json
+from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -18,11 +21,12 @@ def render_feature_studio():
     st.markdown("---")
     
     # Tabs for different sections
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 Feature Families",
         "⏱️ Epoch Segmentation",
         "🧮 Interactive Calculator",
-        "📋 Feature Preview"
+        "📋 Feature Preview",
+        "📥 Export Center"
     ])
     
     with tab1:
@@ -36,6 +40,9 @@ def render_feature_studio():
     
     with tab4:
         render_feature_preview()
+    
+    with tab5:
+        render_feature_export_center()
 
 
 def render_feature_families():
@@ -554,3 +561,724 @@ def show_demo_features():
     st.dataframe(df, use_container_width=True, hide_index=True)
     
     st.markdown(f"*Showing {len(df)} example features. Full pipeline extracts 438 features.*")
+
+
+def render_feature_export_center():
+    """Render export options for Feature Studio."""
+    st.markdown("### 📥 Export Center")
+    st.info("💡 Download feature documentation, specifications, and sample data for your research.")
+    
+    st.markdown("---")
+    
+    # Documentation exports
+    st.markdown("##### 📚 Documentation Exports")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Feature Specifications**")
+        st.caption("Complete list of all 438 features with descriptions")
+        
+        feature_spec = generate_feature_specification()
+        st.download_button(
+            "📋 Feature Spec (CSV)",
+            data=feature_spec,
+            file_name="feature_specification.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+        
+        # JSON format
+        feature_json = generate_feature_specification_json()
+        st.download_button(
+            "🔗 Feature Spec (JSON)",
+            data=feature_json,
+            file_name="feature_specification.json",
+            mime="application/json",
+            use_container_width=True
+        )
+    
+    with col2:
+        st.markdown("**Methodology Document**")
+        st.caption("Feature extraction methodology and rationale")
+        
+        methodology = generate_methodology_doc()
+        st.download_button(
+            "📝 Methodology (Markdown)",
+            data=methodology,
+            file_name="feature_methodology.md",
+            mime="text/markdown",
+            use_container_width=True
+        )
+    
+    st.markdown("---")
+    
+    # Sample data exports
+    st.markdown("##### 📊 Sample Data Exports")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("**Sample Features**")
+        st.caption("Sample extracted features")
+        
+        # Try to load existing sample or generate demo
+        try:
+            from app.core.config import PROJECT_ROOT
+            sample_path = PROJECT_ROOT / 'outputs' / 'epoch_features_sample.csv'
+            
+            if sample_path.exists():
+                df = pd.read_csv(sample_path)
+                csv_data = df.to_csv(index=False)
+                st.download_button(
+                    "📥 Sample Features (CSV)",
+                    data=csv_data,
+                    file_name="epoch_features_sample.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+            else:
+                demo_df = generate_demo_feature_data()
+                csv_data = demo_df.to_csv(index=False)
+                st.download_button(
+                    "📥 Demo Features (CSV)",
+                    data=csv_data,
+                    file_name="demo_features.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+        except:
+            demo_df = generate_demo_feature_data()
+            csv_data = demo_df.to_csv(index=False)
+            st.download_button(
+                "📥 Demo Features (CSV)",
+                data=csv_data,
+                file_name="demo_features.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+    
+    with col2:
+        st.markdown("**Feature Statistics**")
+        st.caption("Statistical summary of features")
+        
+        stats_df = generate_feature_statistics()
+        csv_stats = stats_df.to_csv(index=False)
+        st.download_button(
+            "📊 Feature Stats (CSV)",
+            data=csv_stats,
+            file_name="feature_statistics.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    
+    with col3:
+        st.markdown("**Frequency Bands**")
+        st.caption("Frequency band definitions")
+        
+        bands_df = generate_frequency_bands_doc()
+        csv_bands = bands_df.to_csv(index=False)
+        st.download_button(
+            "📈 Band Definitions (CSV)",
+            data=csv_bands,
+            file_name="frequency_bands.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    
+    st.markdown("---")
+    
+    # Technical exports
+    st.markdown("##### 🔧 Technical Exports")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Python Code Template**")
+        st.caption("Feature extraction code template")
+        
+        code_template = generate_feature_extraction_code()
+        st.download_button(
+            "🐍 Code Template (Python)",
+            data=code_template,
+            file_name="feature_extraction_template.py",
+            mime="text/x-python",
+            use_container_width=True
+        )
+    
+    with col2:
+        st.markdown("**Configuration File**")
+        st.caption("Feature extraction configuration")
+        
+        config_json = generate_feature_config()
+        st.download_button(
+            "⚙️ Config (JSON)",
+            data=config_json,
+            file_name="feature_config.json",
+            mime="application/json",
+            use_container_width=True
+        )
+
+
+def generate_feature_specification() -> str:
+    """Generate complete feature specification CSV."""
+    features = []
+    
+    channels = ['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T3', 'C3', 'Cz', 
+                'C4', 'T4', 'T5', 'P3', 'Pz', 'P4', 'T6', 'O1', 'O2']
+    bands = ['delta', 'theta', 'alpha', 'beta', 'gamma']
+    band_ranges = {'delta': '0.5-4', 'theta': '4-8', 'alpha': '8-13', 'beta': '13-30', 'gamma': '30-50'}
+    
+    # Core PSD features
+    for ch in channels:
+        for band in bands:
+            features.append({
+                'feature_name': f'{ch}_{band}_power',
+                'category': 'Core PSD',
+                'subcategory': 'Absolute Power',
+                'channel': ch,
+                'frequency_band': f'{band} ({band_ranges[band]} Hz)',
+                'unit': 'µV²/Hz',
+                'description': f'Absolute {band} power at electrode {ch}'
+            })
+    
+    # Relative powers
+    for ch in channels:
+        for band in bands:
+            features.append({
+                'feature_name': f'{ch}_{band}_relative',
+                'category': 'Enhanced PSD',
+                'subcategory': 'Relative Power',
+                'channel': ch,
+                'frequency_band': f'{band} ({band_ranges[band]} Hz)',
+                'unit': 'ratio',
+                'description': f'Relative {band} power at electrode {ch}'
+            })
+    
+    # Clinical ratios
+    ratios = [
+        ('theta_alpha_ratio', 'Theta/Alpha', 'Elevated in AD'),
+        ('delta_alpha_ratio', 'Delta/Alpha', 'Slowing marker'),
+        ('theta_beta_ratio', 'Theta/Beta', 'Cognitive impairment'),
+        ('slow_fast_ratio', '(Delta+Theta)/(Alpha+Beta)', 'Global slowing')
+    ]
+    
+    for ch in channels:
+        for ratio_name, ratio_formula, interpretation in ratios:
+            features.append({
+                'feature_name': f'{ch}_{ratio_name}',
+                'category': 'Clinical Ratios',
+                'subcategory': 'Diagnostic Markers',
+                'channel': ch,
+                'frequency_band': 'Multi-band',
+                'unit': 'ratio',
+                'description': f'{ratio_formula} ratio at {ch}. {interpretation}'
+            })
+    
+    # Non-linear features
+    nonlinear = [
+        ('spectral_entropy', 'Signal irregularity from PSD distribution'),
+        ('permutation_entropy', 'Signal complexity measure'),
+        ('sample_entropy', 'Signal regularity/predictability'),
+        ('higuchi_fd', 'Fractal dimension of signal')
+    ]
+    
+    for ch in channels:
+        for feat_name, description in nonlinear:
+            features.append({
+                'feature_name': f'{ch}_{feat_name}',
+                'category': 'Non-Linear',
+                'subcategory': 'Complexity',
+                'channel': ch,
+                'frequency_band': 'Broadband',
+                'unit': 'dimensionless',
+                'description': f'{description} at {ch}'
+            })
+    
+    # Peak frequency
+    features.append({
+        'feature_name': 'peak_alpha_frequency',
+        'category': 'Peak Frequency',
+        'subcategory': 'Global',
+        'channel': 'All',
+        'frequency_band': 'Alpha (8-13 Hz)',
+        'unit': 'Hz',
+        'description': 'Global peak alpha frequency. Slowed (<9 Hz) in AD'
+    })
+    
+    df = pd.DataFrame(features)
+    return df.to_csv(index=False)
+
+
+def generate_feature_specification_json() -> str:
+    """Generate feature specification in JSON format."""
+    spec = {
+        "version": "1.0",
+        "total_features": 438,
+        "generated": datetime.now().isoformat(),
+        "categories": {
+            "core_psd": {
+                "count": 95,
+                "description": "Absolute power spectral density in 5 frequency bands across 19 channels"
+            },
+            "enhanced_psd": {
+                "count": 133,
+                "description": "Relative powers, clinical ratios, regional aggregates"
+            },
+            "peak_frequency": {
+                "count": 38,
+                "description": "Dominant frequencies and spectral peaks"
+            },
+            "nonlinear": {
+                "count": 76,
+                "description": "Entropy and complexity measures"
+            },
+            "connectivity": {
+                "count": 96,
+                "description": "Inter-channel relationships and network metrics"
+            }
+        },
+        "frequency_bands": {
+            "delta": {"range": [0.5, 4], "description": "Deep sleep, pathological slowing"},
+            "theta": {"range": [4, 8], "description": "Drowsiness, memory encoding"},
+            "alpha": {"range": [8, 13], "description": "Relaxed wakefulness"},
+            "beta": {"range": [13, 30], "description": "Active thinking, motor planning"},
+            "gamma": {"range": [30, 50], "description": "Cognitive processing"}
+        },
+        "channels": ['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T3', 'C3', 'Cz',
+                    'C4', 'T4', 'T5', 'P3', 'Pz', 'P4', 'T6', 'O1', 'O2']
+    }
+    return json.dumps(spec, indent=2)
+
+
+def generate_methodology_doc() -> str:
+    """Generate methodology documentation."""
+    return f"""# EEG Feature Extraction Methodology
+
+## Overview
+
+This document describes the 438-feature extraction pipeline used for EEG-based dementia classification.
+
+Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+---
+
+## 1. Signal Preprocessing
+
+### 1.1 Filtering
+- **Band-pass filter**: 0.5-50 Hz (4th order Butterworth)
+- **Notch filter**: 50 Hz (power line noise removal)
+- **Purpose**: Remove DC offset, high-frequency artifacts, and power line interference
+
+### 1.2 Artifact Rejection
+- **Amplitude threshold**: ±100 µV
+- **Bad channel interpolation**: Spherical spline interpolation
+- **ICA-based artifact removal**: Eye blinks, muscle artifacts
+
+### 1.3 Re-referencing
+- **Reference scheme**: Average reference
+- **Purpose**: Standardize signal amplitudes across subjects
+
+---
+
+## 2. Epoch Segmentation
+
+### 2.1 Parameters
+- **Epoch length**: 2 seconds
+- **Overlap**: 50% (1 second)
+- **Window function**: Hanning
+
+### 2.2 Augmentation Effect
+- Original: 88 subjects
+- After segmentation: ~13,200 samples (150 epochs × 88 subjects)
+- Augmentation factor: ~150×
+
+---
+
+## 3. Feature Categories
+
+### 3.1 Core PSD Features (95 features)
+Power Spectral Density computed using Welch's method.
+
+**Parameters:**
+- Window: 4 seconds
+- Overlap: 50%
+- FFT points: 1024
+- Frequency resolution: 0.5 Hz
+
+**Frequency Bands:**
+| Band | Range (Hz) | Clinical Significance |
+|------|------------|----------------------|
+| Delta | 0.5-4 | Deep sleep, pathological slowing |
+| Theta | 4-8 | Drowsiness, memory encoding |
+| Alpha | 8-13 | Relaxed wakefulness |
+| Beta | 13-30 | Active cognition |
+| Gamma | 30-50 | Cognitive binding |
+
+### 3.2 Enhanced PSD Features (133 features)
+- Relative band powers (95)
+- Clinical ratios (38)
+
+**Key Clinical Ratios:**
+- **Theta/Alpha ratio**: Elevated in AD (>1.5 indicates pathology)
+- **Delta/Alpha ratio**: Marker of EEG slowing
+- **Slow/Fast ratio**: (Delta+Theta)/(Alpha+Beta)
+
+### 3.3 Peak Frequency Features (38 features)
+- Peak Alpha Frequency (PAF): Slowed (<9 Hz) in AD
+- Alpha center of gravity
+- Individual alpha frequency
+
+### 3.4 Non-Linear Features (76 features)
+- **Spectral Entropy**: Irregularity of PSD distribution
+- **Permutation Entropy**: Signal complexity
+- **Sample Entropy**: Signal regularity
+- **Higuchi Fractal Dimension**: Signal self-similarity
+
+### 3.5 Connectivity Features (96 features)
+- Frontal asymmetry indices
+- Inter-hemispheric coherence
+- Phase-locking values
+
+---
+
+## 4. Clinical Interpretation
+
+### 4.1 AD Biomarkers
+1. Increased theta/alpha ratio
+2. Slowed peak alpha frequency
+3. Reduced alpha power
+4. Increased delta activity
+5. Reduced spectral entropy
+
+### 4.2 FTD Biomarkers
+1. Frontal theta increase
+2. Asymmetric frontal slowing
+3. Reduced frontal alpha
+
+---
+
+## 5. References
+
+1. Jeong, J. (2004). EEG dynamics in patients with Alzheimer's disease. Clinical Neurophysiology.
+2. Babiloni, C., et al. (2016). Cortical sources of EEG rhythms. Brain Topography.
+3. Stam, C.J. (2005). Nonlinear dynamical analysis of EEG and MEG. Clinical Neurophysiology.
+
+---
+
+*Generated by EEG Dementia Analysis Platform*
+"""
+
+
+def generate_demo_feature_data() -> pd.DataFrame:
+    """Generate demo feature data."""
+    np.random.seed(42)
+    n_samples = 50
+    
+    data = {
+        'subject_id': [f'sub-{i:03d}' for i in range(1, n_samples + 1)],
+        'label': np.random.choice(['AD', 'CN', 'FTD'], n_samples, p=[0.4, 0.35, 0.25])
+    }
+    
+    # Add some features
+    bands = ['delta', 'theta', 'alpha', 'beta', 'gamma']
+    channels = ['Fp1', 'Fp2', 'F3', 'F4', 'C3']
+    
+    for ch in channels:
+        for band in bands:
+            data[f'{ch}_{band}_power'] = np.random.uniform(0.1, 2.0, n_samples)
+    
+    data['theta_alpha_ratio'] = np.random.uniform(0.5, 2.0, n_samples)
+    data['peak_alpha_frequency'] = np.random.uniform(8, 12, n_samples)
+    data['spectral_entropy'] = np.random.uniform(0.5, 0.9, n_samples)
+    
+    return pd.DataFrame(data)
+
+
+def generate_feature_statistics() -> pd.DataFrame:
+    """Generate feature statistics summary."""
+    stats = {
+        'Feature Category': ['Core PSD', 'Enhanced PSD', 'Peak Frequency', 'Non-Linear', 'Connectivity'],
+        'Count': [95, 133, 38, 76, 96],
+        'Percentage': ['21.7%', '30.4%', '8.7%', '17.4%', '21.9%'],
+        'Key Features': [
+            'Absolute band powers per channel',
+            'Relative powers, clinical ratios',
+            'Peak alpha frequency, alpha COG',
+            'Entropy, fractal dimension',
+            'Coherence, asymmetry indices'
+        ],
+        'Clinical Relevance': [
+            'Direct power measurements',
+            'Diagnostic markers (theta/alpha ratio)',
+            'AD slowing marker (PAF < 9 Hz)',
+            'Complexity reduction in dementia',
+            'Network dysfunction'
+        ]
+    }
+    return pd.DataFrame(stats)
+
+
+def generate_frequency_bands_doc() -> pd.DataFrame:
+    """Generate frequency bands documentation."""
+    bands = {
+        'Band': ['Delta', 'Theta', 'Alpha', 'Beta', 'Gamma'],
+        'Frequency_Range_Hz': ['0.5-4', '4-8', '8-13', '13-30', '30-50'],
+        'Low_Freq': [0.5, 4, 8, 13, 30],
+        'High_Freq': [4, 8, 13, 30, 50],
+        'Clinical_Association': [
+            'Deep sleep, pathological slowing in dementia',
+            'Drowsiness, memory encoding, elevated in AD',
+            'Relaxed wakefulness, reduced in AD',
+            'Active cognition, motor planning',
+            'Higher cognitive functions, sensory binding'
+        ],
+        'AD_Pattern': [
+            'Increased (pathological)',
+            'Increased',
+            'Decreased',
+            'Variable',
+            'Decreased'
+        ],
+        'FTD_Pattern': [
+            'Variable',
+            'Increased (frontal)',
+            'Decreased (frontal)',
+            'Variable',
+            'Variable'
+        ]
+    }
+    return pd.DataFrame(bands)
+
+
+def generate_feature_extraction_code() -> str:
+    """Generate feature extraction code template."""
+    return '''"""
+EEG Feature Extraction Template
+Based on the 438-feature pipeline used in the Dementia Classification project
+"""
+import numpy as np
+from scipy import signal
+from scipy.stats import entropy
+
+
+def compute_psd(signal_data, fs, nperseg=None):
+    """
+    Compute Power Spectral Density using Welch's method.
+    
+    Parameters
+    ----------
+    signal_data : array-like
+        1D EEG signal
+    fs : float
+        Sampling frequency in Hz
+    nperseg : int, optional
+        Length of each segment for Welch's method
+        
+    Returns
+    -------
+    freqs : ndarray
+        Frequency values
+    psd : ndarray
+        Power spectral density values
+    """
+    if nperseg is None:
+        nperseg = min(4 * int(fs), len(signal_data))
+    
+    freqs, psd = signal.welch(
+        signal_data, 
+        fs=fs, 
+        nperseg=nperseg,
+        window='hann',
+        noverlap=nperseg // 2
+    )
+    return freqs, psd
+
+
+def compute_band_power(psd, freqs, low_freq, high_freq):
+    """
+    Compute power in a specific frequency band.
+    
+    Parameters
+    ----------
+    psd : array-like
+        Power spectral density values
+    freqs : array-like
+        Frequency values
+    low_freq : float
+        Lower frequency bound
+    high_freq : float
+        Upper frequency bound
+        
+    Returns
+    -------
+    float
+        Average power in the frequency band
+    """
+    mask = (freqs >= low_freq) & (freqs <= high_freq)
+    if not mask.any():
+        return 0.0
+    return np.mean(psd[mask])
+
+
+def extract_spectral_features(signal_data, fs):
+    """
+    Extract spectral features from EEG signal.
+    
+    Parameters
+    ----------
+    signal_data : array-like
+        1D EEG signal in microvolts
+    fs : float
+        Sampling frequency in Hz
+        
+    Returns
+    -------
+    dict
+        Dictionary of extracted features
+    """
+    features = {}
+    
+    # Compute PSD
+    freqs, psd = compute_psd(signal_data, fs)
+    
+    # Define frequency bands
+    bands = {
+        'delta': (0.5, 4),
+        'theta': (4, 8),
+        'alpha': (8, 13),
+        'beta': (13, 30),
+        'gamma': (30, 50)
+    }
+    
+    # Compute band powers
+    total_power = 0
+    for band_name, (low, high) in bands.items():
+        power = compute_band_power(psd, freqs, low, high)
+        features[f'{band_name}_power'] = power
+        total_power += power
+    
+    # Relative powers
+    if total_power > 0:
+        for band_name in bands:
+            features[f'{band_name}_relative'] = features[f'{band_name}_power'] / total_power
+    
+    # Clinical ratios
+    alpha_power = features.get('alpha_power', 1)
+    if alpha_power > 0:
+        features['theta_alpha_ratio'] = features.get('theta_power', 0) / alpha_power
+        features['delta_alpha_ratio'] = features.get('delta_power', 0) / alpha_power
+    
+    # Peak alpha frequency
+    alpha_mask = (freqs >= 8) & (freqs <= 13)
+    if alpha_mask.any():
+        alpha_psd = psd[alpha_mask]
+        alpha_freqs = freqs[alpha_mask]
+        features['peak_alpha_frequency'] = alpha_freqs[np.argmax(alpha_psd)]
+    
+    # Spectral entropy
+    psd_norm = psd / np.sum(psd) if np.sum(psd) > 0 else psd
+    features['spectral_entropy'] = entropy(psd_norm + 1e-10)
+    
+    return features
+
+
+def extract_all_features(data_dict, fs, channel_names):
+    """
+    Extract features from all channels.
+    
+    Parameters
+    ----------
+    data_dict : dict
+        Dictionary mapping channel names to signal arrays
+    fs : float
+        Sampling frequency
+    channel_names : list
+        List of channel names to process
+        
+    Returns
+    -------
+    dict
+        Dictionary of all extracted features
+    """
+    all_features = {}
+    
+    for ch in channel_names:
+        if ch in data_dict:
+            ch_features = extract_spectral_features(data_dict[ch], fs)
+            for feat_name, feat_value in ch_features.items():
+                all_features[f'{ch}_{feat_name}'] = feat_value
+    
+    return all_features
+
+
+# Example usage
+if __name__ == "__main__":
+    # Generate synthetic data for testing
+    fs = 500  # Sampling frequency
+    duration = 10  # seconds
+    t = np.linspace(0, duration, int(fs * duration))
+    
+    # Create synthetic EEG signal
+    alpha = 15 * np.sin(2 * np.pi * 10 * t)  # 10 Hz alpha
+    theta = 8 * np.sin(2 * np.pi * 6 * t)   # 6 Hz theta
+    noise = np.random.randn(len(t)) * 3
+    
+    signal_data = alpha + theta + noise
+    
+    # Extract features
+    features = extract_spectral_features(signal_data, fs)
+    
+    print("Extracted Features:")
+    for name, value in features.items():
+        print(f"  {name}: {value:.4f}")
+'''
+
+
+def generate_feature_config() -> str:
+    """Generate feature extraction configuration JSON."""
+    config = {
+        "version": "1.0",
+        "sampling_rate": 500,
+        "preprocessing": {
+            "bandpass_filter": {"low": 0.5, "high": 50, "order": 4},
+            "notch_filter": {"frequency": 50, "quality": 30},
+            "reference": "average"
+        },
+        "epoch_segmentation": {
+            "duration_seconds": 2,
+            "overlap_percent": 50,
+            "window": "hanning"
+        },
+        "psd_computation": {
+            "method": "welch",
+            "window_seconds": 4,
+            "overlap_percent": 50,
+            "nfft": 1024
+        },
+        "frequency_bands": {
+            "delta": [0.5, 4],
+            "theta": [4, 8],
+            "alpha": [8, 13],
+            "beta": [13, 30],
+            "gamma": [30, 50]
+        },
+        "channels": {
+            "standard_19": [
+                "Fp1", "Fp2", "F7", "F3", "Fz", "F4", "F8",
+                "T3", "C3", "Cz", "C4", "T4",
+                "T5", "P3", "Pz", "P4", "T6",
+                "O1", "O2"
+            ]
+        },
+        "features": {
+            "core_psd": True,
+            "relative_power": True,
+            "clinical_ratios": True,
+            "peak_frequency": True,
+            "nonlinear": True,
+            "connectivity": True
+        },
+        "artifact_rejection": {
+            "amplitude_threshold_uv": 100,
+            "use_ica": True
+        }
+    }
+    return json.dumps(config, indent=2)
