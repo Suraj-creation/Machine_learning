@@ -1,7 +1,18 @@
 const { GoogleGenerativeAI } = require('./eeg-alzheimer-blog/node_modules/@google/generative-ai');
 
 async function testModels() {
-  const apiKey = 'AIzaSyCetmjG-xcwoO3Y7xKVBbgJ1rUqZTHLn60';
+  // Load API key from .env.local instead of hardcoding
+  const fs = require('fs');
+  const path = require('path');
+  const envPath = path.join(__dirname, 'eeg-alzheimer-blog', '.env.local');
+  const envContent = fs.readFileSync(envPath, 'utf8');
+  const match = envContent.match(/GEMINI_API_KEY=(.+)/);
+  const apiKey = match ? match[1].trim() : '';
+  
+  if (!apiKey) {
+    console.error('❌ No API key found in .env.local');
+    process.exit(1);
+  }
   const genAI = new GoogleGenerativeAI(apiKey);
   
   // List of models to try
