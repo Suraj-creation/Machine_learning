@@ -11,6 +11,34 @@ import {
 const apiKey = process.env.GEMINI_API_KEY;
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
+// Retry helper with exponential backoff
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  baseDelay: number = 1000
+): Promise<T> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      const isRateLimit = error instanceof Error && 
+        (error.message.includes("429") || 
+         error.message.includes("quota") || 
+         error.message.includes("limit") ||
+         error.message.includes("RESOURCE_EXHAUSTED"));
+      
+      if (isRateLimit && attempt < maxRetries - 1) {
+        const delay = baseDelay * Math.pow(2, attempt);
+        console.log(`Rate limited, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error("Max retries exceeded");
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -25,14 +53,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Initialize model with optimized settings (Gemini 2.0 Flash)
+    // Use Gemini 2.0 Flash model (fast, reliable, good rate limits)
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-exp-1206",
+      model: "gemini-2.0-flash",
       generationConfig: {
         temperature: 0.7,
         topK: 40,
         topP: 0.95,
-        maxOutputTokens: 2048, // Increased for comprehensive explanations
+        maxOutputTokens: 1024,
       },
       systemInstruction: geminiSystemPrompt,
     });
@@ -80,10 +108,14 @@ export async function POST(request: NextRequest) {
         break;
     }
 
-    // Generate response
-    const result = await model.generateContent(userPrompt);
-    const response = await result.response;
-    const text = response.text();
+    // Generate response with retry logic for rate limits
+    const generateResponse = async () => {
+      const result = await model.generateContent(userPrompt);
+      const response = await result.response;
+      return response.text();
+    };
+
+    const text = await retryWithBackoff(generateResponse, 3, 1000);
 
     // Validate response
     if (!text || text.trim().length === 0) {
@@ -102,16 +134,16 @@ export async function POST(request: NextRequest) {
     // Provide more specific error messages
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
     
-    if (errorMessage.includes("API_KEY")) {
+    if (errorMessage.includes("API_KEY") || errorMessage.includes("invalid")) {
       return NextResponse.json(
         { error: "Invalid API key. Please check your GEMINI_API_KEY." },
         { status: 401 }
       );
     }
     
-    if (errorMessage.includes("quota") || errorMessage.includes("limit")) {
+    if (errorMessage.includes("quota") || errorMessage.includes("limit") || errorMessage.includes("429") || errorMessage.includes("RESOURCE_EXHAUSTED")) {
       return NextResponse.json(
-        { error: "API rate limit reached. Please try again in a moment." },
+        { error: "API rate limit reached. Please wait a few seconds and try again." },
         { status: 429 }
       );
     }
@@ -120,6 +152,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: "Content was blocked by safety filters. Please try a different term." },
         { status: 400 }
+      );
+    }
+
+    if (errorMessage.includes("not found") || errorMessage.includes("404")) {
+      return NextResponse.json(
+        { error: "AI model not available. Please try again later." },
+        { status: 503 }
       );
     }
 
