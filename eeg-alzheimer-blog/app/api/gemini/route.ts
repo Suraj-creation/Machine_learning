@@ -147,9 +147,9 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Use Gemini Flash model (fast, good rate limits)
+    // Use Gemini 2.0 Flash Experimental model (latest, fast)
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-1.5-flash",
+      model: "gemini-2.0-flash-exp",
       generationConfig: {
         temperature: 0.7,
         topK: 40,
@@ -242,7 +242,9 @@ export async function POST(request: NextRequest) {
     
     if (errorMessage.includes("quota") || errorMessage.includes("limit") || errorMessage.includes("429") || errorMessage.includes("RESOURCE_EXHAUSTED")) {
       return NextResponse.json(
-        { error: "API rate limit reached. Please wait a few seconds and try again." },
+        { 
+          error: "API quota exceeded. The free tier has limited requests per minute. Cached responses will still work. Please wait 60 seconds or upgrade your API plan at https://ai.google.dev/pricing" 
+        },
         { status: 429 }
       );
     }
@@ -256,7 +258,7 @@ export async function POST(request: NextRequest) {
 
     if (errorMessage.includes("not found") || errorMessage.includes("404")) {
       return NextResponse.json(
-        { error: "AI model not available. Please try again later." },
+        { error: "The Gemini model is temporarily unavailable. This may be due to API version changes. Please check the console for details or contact support." },
         { status: 503 }
       );
     }
