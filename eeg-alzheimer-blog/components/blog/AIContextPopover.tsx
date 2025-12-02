@@ -7,6 +7,7 @@ import { X, Sparkles, Loader2, Copy, Check, Brain, BookOpen, Maximize2, Minimize
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { apiCache } from "@/lib/api-cache";
 
 interface AIContextPopoverProps {
   children: React.ReactNode;
@@ -35,30 +36,55 @@ function InlineTerm({
     setIsOpen(true);
     if (explanation) return; // Already loaded
     
+    // Check client-side cache first
+    const cachedResponse = apiCache.get({
+      term,
+      mode: "term",
+      sectionContext,
+    });
+    
+    if (cachedResponse) {
+      setExplanation(cachedResponse);
+      return;
+    }
+    
     setIsLoading(true);
     setError(null);
 
     try {
-      const response = await fetch("/api/gemini", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          term,
-          surroundingText: "",
-          sectionContext,
-          mode: "term",
-        }),
-      });
+      const fetchExplanation = async () => {
+        const response = await fetch("/api/gemini", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            term,
+            surroundingText: "",
+            sectionContext,
+            mode: "term",
+          }),
+        });
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || "Failed to get explanation");
-      }
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || "Failed to get explanation");
+        }
 
-      const data = await response.json();
-      setExplanation(data.explanation);
+        const data = await response.json();
+        return data.explanation;
+      };
+
+      // Queue the request to prevent rate limiting
+      const result = await apiCache.queueRequest(fetchExplanation);
+      
+      // Cache the response
+      apiCache.set({ term, mode: "term", sectionContext }, result);
+      setExplanation(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to generate explanation.");
+      const errorMsg = err instanceof Error ? err.message : "Unable to generate explanation.";
+      setError(errorMsg.includes("rate limit") 
+        ? "Too many requests. Please wait a moment and try again."
+        : errorMsg
+      );
       console.error("AI explanation error:", err);
     } finally {
       setIsLoading(false);
@@ -212,31 +238,58 @@ export function AIContextPopover({ children, sectionContext = "General", term }:
     setPosition({ x: event.clientX, y: event.clientY });
     setIsOpen(true);
     setError(null);
-    setExplanation("");
-    setIsLoading(true);
     setIsExpanded(false);
 
+    // Check cache first
+    const cachedResponse = apiCache.get({
+      term: text,
+      mode: "term",
+      sectionContext,
+    });
+
+    if (cachedResponse) {
+      setExplanation(cachedResponse);
+      setIsLoading(false);
+      return;
+    }
+
+    setExplanation("");
+    setIsLoading(true);
+
     try {
-      const response = await fetch("/api/gemini", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          term: text,
-          surroundingText: surrounding,
-          sectionContext,
-          mode: "term",
-        }),
-      });
+      const fetchExplanation = async () => {
+        const response = await fetch("/api/gemini", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            term: text,
+            surroundingText: surrounding,
+            sectionContext,
+            mode: "term",
+          }),
+        });
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || "Failed to get explanation");
-      }
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || "Failed to get explanation");
+        }
 
-      const data = await response.json();
-      setExplanation(data.explanation);
+        const data = await response.json();
+        return data.explanation;
+      };
+
+      // Queue the request to prevent rate limiting
+      const result = await apiCache.queueRequest(fetchExplanation);
+      
+      // Cache the response
+      apiCache.set({ term: text, mode: "term", sectionContext }, result);
+      setExplanation(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to generate explanation. Please try again.");
+      const errorMsg = err instanceof Error ? err.message : "Unable to generate explanation. Please try again.";
+      setError(errorMsg.includes("rate limit") 
+        ? "Too many requests. Waiting before next request..."
+        : errorMsg
+      );
       console.error("AI explanation error:", err);
     } finally {
       setIsLoading(false);
